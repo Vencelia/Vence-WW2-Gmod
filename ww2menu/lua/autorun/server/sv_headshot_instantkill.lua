@@ -12,7 +12,7 @@ if SERVER then
     local METAL_HIT_SND  = "physics/metal/metal_solid_impact_bullet2.wav"
     local BODY_BREAK_SND = "physics/body/body_medium_break2.wav"
     local HELMET_CHANCE  = 0.99
-    local HELMET_MODEL   = "models/ro1soviet_rifleman_helmet.mdl"
+    local HELMET_MODEL   = "models/half-dead/red orchestra 2/sov/w_helmet.mdl"
     local NW_HELMET_USED = "WW2_HelmetConsumed"
 
     local COLOR_REICH = Color(85,85,85,255)

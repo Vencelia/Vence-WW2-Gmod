@@ -79,22 +79,22 @@ end
 
 function WW2_AbrirMenuClases_Reich()
     BuildClassesFrame("CLASES TERCER REICH", {
-        { title="ASALTO",       classId=WW2.CLASE.REICH_ASALTO,       model="models/player/dod_german.mdl",
+        { title="ASALTO",       classId=WW2.CLASE.REICH_ASALTO,       model="Infanteria Alemana",
           weaponsTxt="MP40, Pala de trinchera (DE), Luger P08, Granada M24" },
 
-        { title="FUSILERO",     classId=WW2.CLASE.REICH_FUSILERO,     model="models/player/dod_german.mdl",
+        { title="FUSILERO",     classId=WW2.CLASE.REICH_FUSILERO,     model="Infanteria Alemana",
           weaponsTxt="Kar98k, Luger P08, Bayoneta K98k" },
 
-        { title="SOPORTE",      classId=WW2.CLASE.REICH_SOPORTE,      model="models/player/dod_german.mdl",
+        { title="SOPORTE",      classId=WW2.CLASE.REICH_SOPORTE,      model="Infanteria Alemana",
           weaponsTxt="StG 44, Luger P08, Pala de trinchera (DE), Granada N39, Granada M24" },
 
-        { title="AMETRALLADOR", classId=WW2.CLASE.REICH_AMETRALLADOR, model="models/player/dod_german.mdl",
+        { title="AMETRALLADOR", classId=WW2.CLASE.REICH_AMETRALLADOR, model="Infanteria Alemana",
           weaponsTxt="MG34, P38, Granada N39" },
 
-        { title="MÉDICO",       classId=WW2.CLASE.REICH_MEDICO,       model="models/player/dod_german.mdl",
+        { title="MÉDICO",       classId=WW2.CLASE.REICH_MEDICO,       model="Infanteria Alemana",
           weaponsTxt="G43, Botiquín, P38" },
 
-        { title="TANQUISTA",    classId=WW2.CLASE.REICH_TANQUISTA,    model="models/tank_crew5.mdl",
+        { title="TANQUISTA",    classId=WW2.CLASE.REICH_TANQUISTA,    model="Tripulante de Tanque",
           weaponsTxt="MP40, Granada M24, P38, Herramienta de reparación, Pala de trinchera (DE), Extintor" }
     })
 end

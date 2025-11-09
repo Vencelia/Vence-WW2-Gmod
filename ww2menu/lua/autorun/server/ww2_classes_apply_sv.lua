@@ -4,24 +4,24 @@ util.AddNetworkString("WW2_ElegirClase")
 util.AddNetworkString("WW2_DeployAck")
 
 local MODEL = {
-    reich = "models/player/dod_german.mdl",
-    ussr  = "models/ro1soviet_rifleman4pm.mdl",
+    reich = "models/half-dead/red orchestra 2/ger/rawrecruit.mdl",
+    ussr  = "models/half-dead/red orchestra 2/sov/rawrecruit.mdl",
 }
 
 local LOADOUT = {
-    REICH_TANQUISTA = { "cw_kk_ins2_doi_mp40", "cw_kk_ins2_doi_nade_m24", "cw_kk_ins2_doi_p38", "weapon_lvsrepair", "cw_kk_ins2_doi_mel_shovel_de", "weapon_extinguisher" },
-    REICH_ASALTO       = { "cw_kk_ins2_doi_mp40", "cw_kk_ins2_doi_mel_shovel_de", "cw_kk_ins2_doi_luger", "cw_kk_ins2_doi_nade_m24" },
-    REICH_FUSILERO     = { "cw_kk_ins2_doi_k98k", "dcw_kk_ins2_doi_luger", "dcw_kk_ins2_doi_mel_k98k" },
-    REICH_SOPORTE      = { "cw_kk_ins2_doi_stg44", "cw_kk_ins2_doi_luger", "cw_kk_ins2_doi_mel_shovel_de", "cw_kk_ins2_doi_nade_n39", "cw_kk_ins2_doi_nade_m24" },
-    REICH_AMETRALLADOR = { "cw_kk_ins2_doi_mg34", "cw_kk_ins2_doi_p38", "cw_kk_ins2_doi_nade_n39" },
-    REICH_MEDICO       = { "cw_kk_ins2_doi_g43", "weapon_medkit", "cw_kk_ins2_doi_p38" },
+    REICH_TANQUISTA = { "tfa_codww2_mp40", "tfa_codww2_ger_frag", "tfa_codww2_p38", "weapon_lvsrepair", "tfa_codww2_shovel", "weapon_extinguisher" },
+    REICH_ASALTO       = { "tfa_codww2_mp40", "tfa_codww2_shovel", "tfa_codww2_luger", "tfa_codww2_ger_frag" },
+    REICH_FUSILERO     = { "tfa_codww2_kar98k", "tfa_codww2_luger", "tfa_codww2_trenchknife" },
+    REICH_SOPORTE      = { "tfa_codww2_stg44", "tfa_codww2_luger", "tfa_codww2_shovel", "tfa_codww2_m18_smoke", "tfa_codww2_ger_frag" },
+    REICH_AMETRALLADOR = { "tfa_codww2_mg42", "tfa_codww2_luger", "tfa_codww2_ger_frag" },
+    REICH_MEDICO       = { "tfa_codww2_gewehr43", "weapon_medkit", "tfa_codww2_p38" },
 	
-    USSR_TANQUISTA  = { "cw_kk_ins2_doi_east_ppd40_drum", "cw_kk_ins2_doi_east_tt33", "weapon_lvsrepair", "cw_kk_ins2_doi_nade_east_rpg40", "cw_kk_ins2_doi_mel_shovel_us", "weapon_extinguisher" },
-    USSR_ASALTO   = { "cw_kk_ins2_doi_east_ppd40_drum", "cw_kk_ins2_doi_east_m1895dbl", "cw_kk_ins2_doi_nade_east_rg42", "cw_kk_ins2_doi_mel_shovel_us" },
-    USSR_FUSILERO = { "cw_kk_ins2_doi_east_mel_svt40bayonet", "cw_kk_ins2_doi_nade_east_rpg40", "cw_kk_ins2_doi_east_m1895dbl", "cw_kk_ins2_doi_nade_tnt_soviet" },
-    USSR_SOPORTE  = { "cw_kk_ins2_doi_east_pps43", "cw_kk_ins2_doi_nade_east_f1", "cw_kk_ins2_doi_east_nade_rdg1", "cw_kk_ins2_doi_mel_shovel_us" },
-    USSR_MEDICO   = { "cw_kk_ins2_doi_east_svt40", "weapon_medkit", "cw_kk_ins2_doi_east_mel_svt40bayonet", "cw_kk_ins2_doi_east_tt33" },
-	USSR_AMETRALLADOR   = { "cw_kk_ins2_doi_east_dp27", "cw_kk_ins2_doi_east_nade_rdg1", "cw_kk_ins2_doi_east_tt33", "cw_kk_ins2_doi_mel_shovel_us" },
+    USSR_TANQUISTA  = { "tfa_codww2_greasegun", "tfa_codww2_no2", "weapon_lvsrepair", "tfa_codww2_n74_mk1", "tfa_codww2_shovel", "weapon_extinguisher" },
+    USSR_ASALTO   = { "tfa_codww2_ppsh41", "tfa_codww2_no2", "tfa_codww2_molotov", "ctfa_codww2_shovel" },
+    USSR_FUSILERO = { "tfa_codww2_mosin", "tfa_codww2_no2", "tfa_codww2_molotov", "tfa_codww2_trenchknife" },
+    USSR_SOPORTE  = { "tfa_codww2_avs36", "tfa_codww2_m18_smoke", "tfa_codww2_usa_frag", "tfa_codww2_shovel" },
+    USSR_MEDICO   = { "tfa_codww2_svt40", "weapon_medkit", "tfa_codww2_trenchknife", "tfa_codww2_molotov" },
+	USSR_AMETRALLADOR   = { "tfa_codww2_lewis", "tfa_codww2_molotov", "tfa_codww2_no2", "tfa_codww2_shovel" },
 }
 
 local function strip_weapons(ply)
@@ -46,7 +46,7 @@ local function apply_class(ply, classId, side)
     classId = classId or ply:GetNWString("ww2_class","")
     if side == "" or classId == "" then return end
 
-    if classId == "reich_tanquista" then ply:SetModel("models/tank_crew5.mdl") elseif classId == "ussr_tanquista" then ply:SetModel("models/ro_ost_41-45_soviet_tank_crew3pm.mdl") elseif MODEL[side] then ply:SetModel(MODEL[side]) end
+    if classId == "reich_tanquista" then ply:SetModel("models/half-dead/red orchestra 2/ger/tanker.mdl") elseif classId == "ussr_tanquista" then ply:SetModel("models/half-dead/red orchestra 2/sov/tanker.mdl") elseif MODEL[side] then ply:SetModel(MODEL[side]) end
     local weps = LOADOUT[string.upper(classId)]
     if weps then strip_weapons(ply) give_weapons(ply, weps) end
 end

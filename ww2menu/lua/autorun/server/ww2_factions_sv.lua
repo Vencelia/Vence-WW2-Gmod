@@ -72,12 +72,12 @@ local function ResolveDesiredModel(ply)
     local fac = ply:GetNWString("ww2_faction", "")
     local cls = ply:GetNWString("ww2_class", "")
 
-    if cls == WW2.CLASE.REICH_TANQUISTA then return "models/tank_crew5.mdl" end
-    if cls == WW2.CLASE.USSR_TANQUISTA then return "models/ro_ost_41-45_soviet_tank_crew3pm.mdl" end
+    if cls == WW2.CLASE.REICH_TANQUISTA then return "models/half-dead/red orchestra 2/ger/tanker.mdl" end
+    if cls == WW2.CLASE.USSR_TANQUISTA then return "models/half-dead/red orchestra 2/sov/tanker.mdl" end
     if fac == WW2.FACCION.REICH and cls ~= "" then
-        return "models/player/dod_german.mdl"
+        return "models/half-dead/red orchestra 2/ger/rawrecruit.mdl"
     elseif fac == WW2.FACCION.USSR and cls ~= "" then
-        return "models/ro1soviet_rifleman4pm.mdl"
+        return "models/half-dead/red orchestra 2/sov/rawrecruit.mdl"
     end
     return nil
 end

@@ -36,6 +36,10 @@ local colShadow  = Color(0,0,0,200)
 
 local cvarIconScale = CreateClientConVar("ww2_map_icon_scale", "1.8", true, false, "Escala iconos mapa (0.5..4.0)", 0.5, 4.0)
 
+-- Calibración fina (ajustar si hay offset residual)
+local OFFSET_X = 0
+local OFFSET_Y = 0
+
 local CPTrend = {}
 local LastMarkers = {}
 
@@ -61,7 +65,6 @@ do
                 end
             end
         end
-        -- Clases esperadas (agrega si tienes otras variantes)
         add(ents.FindByClass("ww2_cap_point"))
         add(ents.FindByClass("ww2_capture_point"))
         return t
@@ -81,9 +84,6 @@ do
         return t
     end
 
-    -- Si ya existe un local GetCapturePoints en este archivo, lo reasignamos.
-    -- Si no existe, esta asignación crea/usa el global en este contexto y los
-    -- llamados posteriores lo tomarán igual.
     GetCapturePoints = function()
         if _cp_next > RealTime() then
             return _cp_cache
@@ -99,22 +99,77 @@ do
     end
 end
 -- [[ /override ]]
+
 local function GetBases()
     return ents.FindByClass("ww2_base_reich"), ents.FindByClass("ww2_base_ussr")
 end
 
+-- ============================================
+-- ✅ FIX: PROYECCIÓN 3D→2D CORRECTA
+-- ============================================
+local function WorldToScreenCustom(worldPos, viewData)
+    local ang = viewData.angles
+    local origin = viewData.origin
+    local fov = viewData.fov
+    local w = viewData.w
+    local h = viewData.h
+    
+    -- Vector relativo a la cámara
+    local delta = worldPos - origin
+    
+    -- Rotación inversa (matriz de vista)
+    local forward = ang:Forward()
+    local right = ang:Right()
+    local up = ang:Up()
+    
+    local x = delta:Dot(right)
+    local y = delta:Dot(forward)
+    local z = delta:Dot(up)
+    
+    -- Proyección perspectiva
+    if y <= 0.1 then 
+        return nil, nil, false -- Detrás de la cámara
+    end
+    
+    local fovRad = math.rad(fov)
+    local aspect = w / h
+    local tanHalfFov = math.tan(fovRad / 2)
+    
+    local screenX = (x / (y * tanHalfFov * aspect)) * (w / 2) + (w / 2) + OFFSET_X
+    local screenY = (-z / (y * tanHalfFov)) * (h / 2) + (h / 2) + OFFSET_Y
+    
+    return screenX, screenY, true
+end
+
 local function CollectMarkerScreenPos(view, sx, sy, w, h)
     local points = {}
-    cam.Start3D(view.origin, view.angles, view.fov, sx, sy, w, h)
-        for _, cp in ipairs(GetCapturePoints()) do
-            if IsValid(cp) then
-                local sp = cp:GetPos():ToScreen()
-                points[#points+1] = {cp = cp, x = sp.x - sx, y = sp.y - sy, vis = sp.visible ~= false}
+    local viewData = {
+        origin = view.origin,
+        angles = view.angles,
+        fov = view.fov,
+        w = w,
+        h = h
+    }
+    
+    for _, cp in ipairs(GetCapturePoints()) do
+        if IsValid(cp) then
+            local worldPos = cp:GetPos()
+            local screenX, screenY, visible = WorldToScreenCustom(worldPos, viewData)
+            
+            if screenX and screenY then
+                points[#points+1] = {
+                    cp = cp, 
+                    x = screenX, 
+                    y = screenY, 
+                    vis = visible
+                }
             end
         end
-    cam.End3D()
+    end
+    
     return points
 end
+-- ============================================
 
 local function ClampToPanel(px, py, panelW, panelH, margin)
     margin = margin or 6
@@ -159,15 +214,25 @@ local function DrawMarkers(points, panelW, panelH, scale, sx, sy, view)
     local t = CurTime()
     local cx, cy = panelW * 0.5, panelH * 0.5
 
+    -- ✅ FIX: Proyección correcta para bases
+    local viewData = {
+        origin = view.origin,
+        angles = view.angles,
+        fov = view.fov,
+        w = panelW,
+        h = panelH
+    }
+
     -- Bases first (circles)
     local basesReich, basesUSSR = GetBases()
     local function drawBaseList(list, col, text, side)
         for _, b in ipairs(list) do
             if not IsValid(b) then continue end
-            cam.Start3D(view.origin, view.angles, view.fov, sx, sy, panelW, panelH)
-                local sp = b:GetPos():ToScreen()
-            cam.End3D()
-            local px, py = sp.x - sx, sp.y - sy
+            
+            -- ✅ PROYECCIÓN CORRECTA (sin cam.Start3D)
+            local px, py, visible = WorldToScreenCustom(b:GetPos(), viewData)
+            if not px then continue end
+            
             px, py = ClampToPanel(px, py, panelW, panelH, 18)
             local baseSize = math.min(panelW, panelH) * 0.10 * scale
             local r = math.floor(baseSize * 0.5)
@@ -261,10 +326,6 @@ local function PointInCircle(x, y, c) local dx, dy = x - c.x, y - c.y return (dx
 
 function WW2_AbrirMenuDespliegue(selectedClassId)
     
-    
-
-
-
 -- [[ TANQUISTA: helpers ]] 
 local function IsTanquistaClass(cls)
     return cls == WW2.CLASE.REICH_TANQUISTA or cls == WW2.CLASE.USSR_TANQUISTA
@@ -443,18 +504,9 @@ local scrW, scrH = ScrW(), ScrH()
             local view = {origin=origin, angles=Angle(90, yaw, 0), x=sx, y=sy, w=w, h=h, fov=camEnt.GetCamFOV and camEnt:GetCamFOV() or 70, drawviewmodel=false, drawhud=false, znear=3}
 
             render.RenderView(view)
-            local pts = (function()
-                local res = {}
-                cam.Start3D(view.origin, view.angles, view.fov, sx, sy, w, h)
-                    for _, cp in ipairs(GetCapturePoints()) do
-                        if IsValid(cp) then
-                            local sp = cp:GetPos():ToScreen()
-                            res[#res+1] = {cp = cp, x = sp.x - sx, y = sp.y - sy, vis = sp.visible ~= false}
-                        end
-                    end
-                cam.End3D()
-                return res
-            end)()
+            
+            -- ✅ FIX: Usar nueva función de proyección
+            local pts = CollectMarkerScreenPos(view, sx, sy, w, h)
 
             render.SetScissorRect(sx, sy, sx + w, sy + h, true)
             local scale = math.Clamp(cvarIconScale:GetFloat(), 0.5, 4.0)
@@ -476,7 +528,6 @@ local scrW, scrH = ScrW(), ScrH()
             if mk.kind == "base" and PointInCircle(px, py, mk) then
                 local side = LocalPlayer():GetNWString("ww2_faction","")
                 if side == mk.side then
-                    -- CAMION sólo en base
                     WW2_OpenTransportDialog("base", "", true)
                 end
                 return
@@ -485,9 +536,8 @@ local scrW, scrH = ScrW(), ScrH()
         for _, mk in ipairs(LastMarkers) do
             if mk.kind == "point" and PointInRect(px, py, mk) then
                 if not WW2_CanDeployToPoint(mk.label or "") then surface.PlaySound("buttons/button10.wav"); return end
-                -- En puntos no mostrar CAMION
                 if IsTanquistaClass(selectedClassId) then return end 
-WW2_OpenTransportDialog("point", mk.label or "", false)
+                WW2_OpenTransportDialog("point", mk.label or "", false)
                 return
             end
         end
