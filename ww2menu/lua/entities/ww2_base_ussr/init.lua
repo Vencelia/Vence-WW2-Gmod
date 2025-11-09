@@ -1,0 +1,15 @@
+AddCSLuaFile("shared.lua")
+AddCSLuaFile("cl_init.lua")
+include("shared.lua")
+function ENT:Initialize()
+    self:SetModel("models/hunter/blocks/cube05x05x05.mdl")
+    self:DrawShadow(true)
+    self:SetNoDraw(false)
+    self:SetSolid(SOLID_VPHYSICS)
+    self:PhysicsInit(SOLID_VPHYSICS)
+    self:SetMoveType(MOVETYPE_VPHYSICS)
+    self:SetUseType(SIMPLE_USE)
+    local phys = self:GetPhysicsObject()
+    if IsValid(phys) then phys:EnableMotion(false) phys:Wake() end
+    self:SetNWString("base_side", "ussr")
+end
