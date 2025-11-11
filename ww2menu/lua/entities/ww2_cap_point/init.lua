@@ -3,7 +3,7 @@ AddCSLuaFile("cl_init.lua")
 include("shared.lua")
 
 local CAP_RADIUS = 1000            -- unidades
-local CAP_SPEED  = 0.12            -- progreso por segundo por diferencia de jugadores
+local CAP_SPEED  = 0.05            -- ✅ CAMBIADO: 0.12 → 0.03 (4x más lento)
 local NEXT_INDEX = NEXT_INDEX or 0 -- índice global simple para nombres A/B/C
 
 function ENT:Initialize()
@@ -84,14 +84,40 @@ function ENT:Think()
     end
     self._control = ctrl
 
-    -- propietario
+    -- ✅ NUEVA LÓGICA MEJORADA: El propietario solo cambia al cruzar el centro
     local owner = self:GetNWString("cap_owner", "")
+    
+    -- Captura completa
     if ctrl >= 0.999 then
         owner = "reich"
     elseif ctrl <= -0.999 then
         owner = "ussr"
-    elseif math.abs(ctrl) < 0.999 then
-        owner = ""
+    else
+        -- ✅ FIX: Mantener dueño actual hasta que la barra cruce el centro (0)
+        
+        -- Si el punto es de Reich (owner = "reich")
+        if owner == "reich" then
+            -- Solo pierde el punto si la barra cruza a territorio negativo (USSR)
+            if ctrl < 0 then
+                owner = "" -- Pasa a neutral al cruzar el centro
+            end
+        
+        -- Si el punto es de USSR (owner = "ussr")
+        elseif owner == "ussr" then
+            -- Solo pierde el punto si la barra cruza a territorio positivo (Reich)
+            if ctrl > 0 then
+                owner = "" -- Pasa a neutral al cruzar el centro
+            end
+        
+        -- Si el punto es neutral (owner = "")
+        else
+            -- Se asigna al primero que llegue cerca del extremo
+            if ctrl >= 0.8 then
+                owner = "reich"
+            elseif ctrl <= -0.8 then
+                owner = "ussr"
+            end
+        end
     end
 
     self:SetNWFloat("cap_control", ctrl)

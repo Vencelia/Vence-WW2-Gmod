@@ -98,6 +98,75 @@ local function ForceModel(ply, mdl)
     ply:SetNWString("ww2_forced_model", mdl)
 end
 
+-- ✅ NUEVA FUNCIÓN: Aplicar bodygroup "helmet" solo a infantería USSR
+local function ApplyHelmetBodygroup(ply)
+    if not IsValid(ply) then return end
+    
+    local fac = ply:GetNWString("ww2_faction", "")
+    local cls = ply:GetNWString("ww2_class", "")
+    
+    -- Debug: ver todos los bodygroups disponibles
+    print(string.format("[WW2 Debug] Jugador: %s | Facción: %s | Clase: %s", ply:Nick(), fac, cls))
+    print(string.format("[WW2 Debug] Modelo: %s", ply:GetModel()))
+    
+    -- Listar TODOS los bodygroups del modelo
+    local numBodygroups = ply:GetNumBodyGroups()
+    print(string.format("[WW2 Debug] Bodygroups totales: %d", numBodygroups))
+    
+    for i = 0, numBodygroups - 1 do
+        local bgName = ply:GetBodygroupName(i)
+        local bgCount = ply:GetBodygroupCount(i)
+        local bgCurrent = ply:GetBodygroup(i)
+        print(string.format("[WW2 Debug]   [%d] Nombre: '%s' | Opciones: %d | Actual: %d", 
+            i, bgName, bgCount, bgCurrent))
+    end
+    
+    -- Solo USSR infantería (NO tanquistas)
+    if fac == WW2.FACCION.USSR and cls ~= WW2.CLASE.USSR_TANQUISTA and cls ~= "" then
+        -- ✅ FIX: Buscar por "headwear" que es la categoría que contiene "helmet"
+        local possibleNames = {"headwear", "Headwear", "HEADWEAR", "helmet", "Helmet", "head", "Head"}
+        local foundIdx = nil
+        
+        for _, name in ipairs(possibleNames) do
+            local idx = ply:FindBodygroupByName(name)
+            if idx and idx >= 0 then
+                foundIdx = idx
+                print(string.format("[WW2 Debug] ✅ Bodygroup encontrado: '%s' en índice %d", name, idx))
+                break
+            end
+        end
+        
+        if foundIdx then
+            -- ✅ Activar helmet (valor 1 = con casco)
+            -- Si el orden es: 0=sin nada, 1=helmet, 2=otra cosa
+            ply:SetBodygroup(foundIdx, 1)
+            print(string.format("[WW2] ✅ Casco activado para %s (índice %d -> valor 1)", ply:Nick(), foundIdx))
+            
+            -- Verificar que se aplicó
+            timer.Simple(0.1, function()
+                if IsValid(ply) then
+                    local checkVal = ply:GetBodygroup(foundIdx)
+                    print(string.format("[WW2 Debug] Verificación: bodygroup %d = %d", foundIdx, checkVal))
+                end
+            end)
+        else
+            print(string.format("[WW2 Debug] ⚠️ NO se encontró bodygroup 'headwear'/'helmet' para el modelo: %s", ply:GetModel()))
+            print("[WW2 Debug] El modelo puede no tener bodygroup de casco o usar otro nombre.")
+        end
+    else
+        -- Reich o tanquistas: sin casco (valor 0)
+        local possibleNames = {"headwear", "Headwear", "HEADWEAR", "helmet", "Helmet"}
+        for _, name in ipairs(possibleNames) do
+            local idx = ply:FindBodygroupByName(name)
+            if idx and idx >= 0 then
+                ply:SetBodygroup(idx, 0) -- Sin casco
+                print(string.format("[WW2] Casco desactivado para %s (bodygroup '%s')", ply:Nick(), name))
+                break
+            end
+        end
+    end
+end
+
 local Enforcer = {}
 
 local function GiveLoadout(ply, fac, cls)
@@ -154,6 +223,27 @@ hook.Add("PlayerSpawn", "WW2_ApplyFactionClassOnSpawn", function(ply)
     local mdl = ResolveDesiredModel(ply)
     if mdl then
         ForceModel(ply, mdl)
+        
+        -- ✅ APLICAR BODYGROUP HELMET (solo USSR infantería)
+        -- Múltiples intentos para asegurar que se aplica
+        timer.Simple(0.05, function()
+            if IsValid(ply) then
+                ApplyHelmetBodygroup(ply)
+            end
+        end)
+        
+        timer.Simple(0.2, function()
+            if IsValid(ply) then
+                ApplyHelmetBodygroup(ply)
+            end
+        end)
+        
+        timer.Simple(0.5, function()
+            if IsValid(ply) then
+                ApplyHelmetBodygroup(ply)
+            end
+        end)
+        
         Enforcer[ply] = { expire = CurTime() + 2.0, mdl = mdl }
         GiveLoadout(ply, fac, cls)
     else

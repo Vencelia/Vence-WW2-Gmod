@@ -1,16 +1,40 @@
--- ww2_deploy_spawns_sv.lua (FIX: POINT -> usa spawns de facción)
+-- ww2_deploy_spawns_sv.lua (CON spawn en vehículos LVS)
 -- Requiere: LVS instalado y clases de spawn en el mapa: ww2_spawn_reich / ww2_spawn_ussr
 if SERVER then
     util.AddNetworkString("WW2_DeployTo")
-    
+    util.AddNetworkString("WW2_DeployAck")
 
+-- === LVS aliveness (server) ===
+local function IsLVSVehicleAlive(veh)
+    if not IsValid(veh) then return false end
+    if veh.GetIsDestroyed and veh:GetIsDestroyed() then return false end
+    if veh.GetDisabled     and veh:GetDisabled()     then return false end
+    local hp, maxhp
+    if veh.GetHP then
+        local okH, v = pcall(function() return veh:GetHP() end)
+        if okH then hp = tonumber(v) end
+    end
+    if veh.GetMaxHP then
+        local okM, v = pcall(function() return veh:GetMaxHP() end)
+        if okM then maxhp = tonumber(v) end
+    end
+    if hp ~= nil and maxhp ~= nil and maxhp > 0 and hp <= 0 then return false end
+    if veh.GetNW2Bool and (veh:GetNW2Bool("LVS_Destroyed", false) or veh:GetNW2Bool("lvs_destroyed", false) or veh:GetNW2Bool("LVS_Disabled", false)) then return false end
+    if veh.GetNWBool  and (veh.GetNWBool("LVS_Destroyed", false)  or veh:GetNWBool("lvs_destroyed", false)  or veh:GetNWBool("LVS_Disabled", false)) then return false end
+    local hp2 = veh.GetNW2Int and veh:GetNW2Int("LVS_HP", -1) or -1
+    if hp2 == 0 then return false end
+    local hp1 = veh.GetNWInt and veh:GetNWInt("LVS_HP", -1) or -1
+    if hp1 == 0 then return false end
+    return true
+end
 
+end
 
-
--- [[ TANQUISTA: helpers ]]
+-- [[ TANQUISTA: helpers ]] - ✅ FIX: Mover FUERA del bloque if SERVER
 local function IsTanquistaClassId(cls)
     return cls == "reich_tanquista" or cls == "ussr_tanquista"
 end
+
 local function IsTanquistaPly(ply)
     local cls = ply:GetNWString("ww2_class","")
     return IsTanquistaClassId(cls)
@@ -38,7 +62,53 @@ local function SpawnLVSClassAtPos(ply, className, pos, ang)
 end
 -- [[ /TANQUISTA: helpers ]]
 
-util.AddNetworkString("WW2_DeployAck")
+-- ✅ NUEVA FUNCIÓN: Verificar si vehículo está destruido (SERVIDOR)
+local function IsVehicleDestroyed(veh)
+    if not IsValid(veh) then return true end
+    
+    -- ✅ Método 1: NetworkVar de LVS "LVS_IsDestroyed"
+    local destroyed = veh:GetNWBool("LVS_IsDestroyed", false)
+    if destroyed then 
+        print("[WW2 Debug] Vehículo destruido (NWBool LVS_IsDestroyed)")
+        return true 
+    end
+    
+    -- ✅ Método 2: HP mediante NetworkVar
+    local hp = veh:GetNWInt("LVS_HP", -1)
+    if hp == 0 then 
+        print("[WW2 Debug] Vehículo destruido (NWInt LVS_HP = 0)")
+        return true 
+    end
+    
+    -- ✅ Método 3: GetHP() método directo
+    if veh.GetHP then
+        local directHP = veh:GetHP()
+        if directHP <= 0 then
+            print("[WW2 Debug] Vehículo destruido (GetHP = " .. directHP .. ")")
+            return true
+        end
+    end
+    
+    -- ✅ Método 4: En llamas
+    if veh:IsOnFire() then 
+        print("[WW2 Debug] Vehículo destruido (en llamas)")
+        return true 
+    end
+    
+    -- ✅ Método 5: GetDestroyed() si existe
+    if veh.GetDestroyed and veh:GetDestroyed() then
+        print("[WW2 Debug] Vehículo destruido (GetDestroyed)")
+        return true
+    end
+    
+    -- ✅ Método 6: Verificar color (vehículos destruidos se ponen oscuros)
+    local col = veh:GetColor()
+    if col.r < 50 and col.g < 50 and col.b < 50 then
+        print("[WW2 Debug] Vehículo destruido (color oscuro)")
+        return true
+    end
+    
+    return false
 end
 
 -- === Utils de facción ===
@@ -144,7 +214,6 @@ local function ResolveSpawnTransform(ply, destType, label)
         if not CanDeployToPointServer(ply, label) then return nil end
         local cp = FindCapturePointByLabel(label)
         if IsValid(cp) then
-            -- FIX: usar el spawn de FACCION MÁS CERCANO AL PUNTO DE CAPTURA
             local spawn = FindNearestFactionSpawn(side, cp:GetPos())
             if IsValid(spawn) then
                 local spos = spawn:GetPos()
@@ -159,6 +228,40 @@ local function ResolveSpawnTransform(ply, destType, label)
                 return gpos, ang
             end
         end
+    
+    -- ✅ NUEVO: Spawn en vehículo
+    elseif destType == "vehicle" then
+        local vehIdx = tonumber(label)
+        if not vehIdx then return nil end
+        
+        local veh = Entity(vehIdx)
+        if not IsValid(veh) then return nil end
+        
+        -- ✅ FIX: Usar función centralizada para verificar destrucción
+        if IsVehicleDestroyed(veh) then
+            print("[WW2] Spawn rechazado: vehículo destruido")
+            return nil
+        end
+        
+        -- ✅ FIX: Lista EXACTA de vehículos permitidos por facción
+        local vehClass = veh:GetClass()
+        local allowedVehicles = {
+            reich = {
+                ["lvs_wheeldrive_fiat_621"] = true
+            },
+            ussr = {
+                ["lvs_wheeldrive_gaz_aaa"] = true
+            }
+        }
+        
+        -- Verificar que el vehículo sea de la facción correcta Y esté en la lista
+        if not allowedVehicles[side] or not allowedVehicles[side][vehClass] then
+            print("[WW2] Vehículo rechazado:", vehClass, "para facción:", side)
+            return nil
+        end
+        
+        -- Retornar posición del vehículo (el spawn se maneja diferente)
+        return veh:GetPos(), veh:GetAngles(), veh
     end
     return nil
 end
@@ -194,6 +297,40 @@ local function ForceEnterDriverSeat(ply, veh)
     if IsValid(best) then
         ply:EnterVehicle(best)
     end
+end
+
+-- ✅ NUEVA FUNCIÓN: Meter jugador en asiento de pasajero (2-6)
+local function ForceEnterPassengerSeat(ply, veh)
+    if not IsValid(veh) or not IsValid(ply) then return false end
+    
+    -- Buscar asientos de pasajero (normalmente índices 1-5, asientos 2-6)
+    local seats = {}
+    for _, ent in ipairs(ents.FindInSphere(veh:GetPos(), 512)) do
+        if IsValid(ent) and ent:GetClass() == "prop_vehicle_prisoner_pod" then
+            -- Excluir el asiento del conductor
+            local isDriverSeat = false
+            if veh.GetDriverSeat then
+                if ent == veh:GetDriverSeat() then
+                    isDriverSeat = true
+                end
+            end
+            
+            if not isDriverSeat then
+                table.insert(seats, ent)
+            end
+        end
+    end
+    
+    -- Buscar el primer asiento libre
+    for _, seat in ipairs(seats) do
+        if IsValid(seat) and not IsValid(seat:GetDriver()) then
+            ply:EnterVehicle(seat)
+            return true
+        end
+    end
+    
+    -- Si no hay asientos libres
+    return false
 end
 
 local function SpawnLVSFor(ply, transport, pos, ang)
@@ -233,16 +370,64 @@ end
 
 -- === Despliegue principal ===
 local function DoDeploy(ply, destType, label, transport)
-    local pos, ang = ResolveSpawnTransform(ply, destType, label)
+    local pos, ang, targetVeh = ResolveSpawnTransform(ply, destType, label)
     if not pos then return end
+
+    -- ✅ NUEVO: Si es spawn en vehículo, verificar asientos ANTES de spawnear
+    if destType == "vehicle" and IsValid(targetVeh) then
+        -- Verificar si hay asientos libres PRIMERO
+        local hasFreeSeat = false
+        for _, ent in ipairs(ents.FindInSphere(targetVeh:GetPos(), 512)) do
+            if IsValid(ent) and ent:GetClass() == "prop_vehicle_prisoner_pod" then
+                local isDriverSeat = false
+                if targetVeh.GetDriverSeat and ent == targetVeh:GetDriverSeat() then
+                    isDriverSeat = true
+                end
+                
+                if not isDriverSeat and not IsValid(ent:GetDriver()) then
+                    hasFreeSeat = true
+                    break
+                end
+            end
+        end
+        
+        -- ✅ FIX: Si no hay asientos libres, NO SPAWNEAR
+        if not hasFreeSeat then
+            if IsValid(ply) then
+                ply:ChatPrint("[WW2] No hay asientos libres en el vehículo.")
+            end
+            return -- NO hacer nada, el jugador sigue en el menú
+        end
+    end
 
     timer.Simple(0.05, function()
         if not IsValid(ply) then return end
 
-        -- Respawn con su clase/armas (tu sistema ya procesa WW2_ElegirClase antes)
+        -- Respawn con su clase/armas
         ply:Spawn()
 
-        -- Colocar jugador
+        -- ✅ NUEVO: Si es spawn en vehículo
+        if destType == "vehicle" and IsValid(targetVeh) then
+            -- Colocar cerca del vehículo
+            ply:SetPos(pos + Vector(0, 0, 50))
+            ply:SetEyeAngles(Angle(0, ang.y, 0))
+            
+            -- Meter en asiento de pasajero
+            timer.Simple(0.1, function()
+                if IsValid(ply) and IsValid(targetVeh) then
+                    local success = ForceEnterPassengerSeat(ply, targetVeh)
+                    if not success then
+                        -- Esto no debería pasar porque ya verificamos antes
+                        ply:ChatPrint("[WW2] Error al entrar al vehículo.")
+                    end
+                end
+            end)
+            
+            net.Start("WW2_DeployAck") net.Send(ply)
+            return
+        end
+
+        -- Flujo normal (base/punto)
         ply:SetPos(pos)
         ply:SetEyeAngles(Angle(0, ang.y, 0))
 
@@ -252,6 +437,7 @@ local function DoDeploy(ply, destType, label, transport)
         elseif transport ~= "auto" and transport ~= "camion" then
             transport = "pie"
         end
+        
         -- CAMION sólo en base
         if destType ~= "base" and transport == "camion" then
             transport = "auto"
@@ -274,13 +460,184 @@ net.Receive("WW2_DeployTo", function(len, ply)
     local destType = string.lower(net.ReadString() or "")
     local label    = net.ReadString() or ""
     local transport = ""
-    pcall(function() transport = net.ReadString() or "" end) -- 3er parámetro (opcional)
+    pcall(function() transport = net.ReadString() or "" end)
 
-    if destType ~= "base" and destType ~= "point" then return end
-    if (ply.GetNWString and ply:GetNWString("ww2_class","") and (ply:GetNWString("ww2_class","")=="reich_tanquista" or ply:GetNWString("ww2_class","")=="ussr_tanquista")) and destType=="point" then
-        return
-    end
+    -- Validaciones
+    if destType ~= "base" and destType ~= "point" and destType ~= "vehicle" then return end
+    
+    -- Tanquistas no pueden usar vehículos de transporte
+    if IsTanquistaPly(ply) and destType == "vehicle" then return end
+    if IsTanquistaPly(ply) and destType == "point" then return end
+    
     if destType == "point" and not CanDeployToPointServer(ply, label) then return end
+    
+    -- ✅ FIX: Validación especial para vehículos destruidos
+    if destType == "vehicle" then
+        local vehIdx = tonumber(label)
+        if vehIdx then
+            local veh = Entity(vehIdx)
+            
+            -- Verificar si existe
+            if not IsValid(veh) then
+                ply:ChatPrint("[WW2] El vehículo ya no existe.")
+                return
+            end
+            
+            -- ✅ Usar función centralizada
+            if IsVehicleDestroyed(veh) then
+                ply:ChatPrint("[WW2] El vehículo está destruido.")
+                return
+            end
+        end
+    end
 
     DoDeploy(ply, destType, label, transport)
+end)
+
+-- ============================================
+-- COMANDOS DE TESTING
+-- ============================================
+
+-- Comando para destruir el vehículo que estás mirando (testing)
+concommand.Add("ww2_destroy_vehicle", function(ply, cmd, args)
+    if not IsValid(ply) or not ply:IsAdmin() then
+        if IsValid(ply) then
+            ply:ChatPrint("[WW2] Solo admins pueden usar este comando.")
+        end
+        return
+    end
+    
+    local tr = ply:GetEyeTrace()
+    local ent = tr.Entity
+    
+    if not IsValid(ent) then
+        ply:ChatPrint("[WW2] No estás mirando ninguna entidad.")
+        return
+    end
+    
+    -- Verificar si es un vehículo LVS
+    local class = ent:GetClass()
+    if not string.StartWith(class, "lvs_") then
+        ply:ChatPrint("[WW2] Eso no es un vehículo LVS.")
+        return
+    end
+    
+    ply:ChatPrint("[WW2] Destruyendo vehículo: " .. class .. " (EntIndex: " .. ent:EntIndex() .. ")")
+    
+    -- ✅ Método 1: Setear HP a 0
+    if ent.SetHP then
+        ent:SetHP(0)
+        ply:ChatPrint("  → HP seteado a 0")
+    end
+    
+    -- ✅ Método 2: Setear NetworkVar HP
+    ent:SetNWInt("LVS_HP", 0)
+    ply:ChatPrint("  → NetworkVar LVS_HP = 0")
+    
+    -- ✅ Método 3: Setear NetworkVar Destroyed
+    ent:SetNWBool("LVS_IsDestroyed", true)
+    ply:ChatPrint("  → NetworkVar LVS_IsDestroyed = true")
+    
+    -- ✅ Método 4: Prender fuego
+    ent:Ignite(999)
+    ply:ChatPrint("  → Vehículo en llamas")
+    
+    -- ✅ Método 5: Oscurecer color
+    ent:SetColor(Color(30, 30, 30, 255))
+    ply:ChatPrint("  → Color oscurecido")
+    
+    -- ✅ Método 6: CRÍTICO - Setear Health() de Source a 0
+    ent:SetHealth(0)
+    ply:ChatPrint("  → Health() seteado a 0")
+    
+    -- ✅ Método 7: Llamar función de destrucción de LVS si existe
+    if ent.LVSExplode then
+        ent:LVSExplode()
+        ply:ChatPrint("  → LVSExplode() llamado")
+    end
+    
+    -- ✅ Forzar sincronización de NetworkVars
+    timer.Simple(0.1, function()
+        if IsValid(ent) then
+            ent:SetNWBool("LVS_IsDestroyed", true)
+            ent:SetNWInt("LVS_HP", 0)
+        end
+    end)
+    
+    ply:ChatPrint("[WW2] ✅ Vehículo destruido completamente")
+    ply:ChatPrint("[WW2] IMPORTANTE: Cierra y abre el menú de despliegue para ver el cambio")
+end)
+
+-- Comando para ver estado de vehículo
+concommand.Add("ww2_vehicle_info", function(ply, cmd, args)
+    if not IsValid(ply) or not ply:IsAdmin() then return end
+    
+    local tr = ply:GetEyeTrace()
+    local ent = tr.Entity
+    
+    if not IsValid(ent) then
+        ply:ChatPrint("[WW2] No estás mirando ninguna entidad.")
+        return
+    end
+    
+    local class = ent:GetClass()
+    if not string.StartWith(class, "lvs_") then
+        ply:ChatPrint("[WW2] Eso no es un vehículo LVS.")
+        return
+    end
+    
+    ply:ChatPrint("=== INFO VEHÍCULO ===")
+    ply:ChatPrint("Clase: " .. class)
+    ply:ChatPrint("EntIndex: " .. ent:EntIndex())
+    ply:ChatPrint("")
+    ply:ChatPrint("--- Métodos de Detección ---")
+    
+    -- Health() de Source
+    local health = ent:Health()
+    ply:ChatPrint("Health(): " .. health .. (health <= 0 and " ❌ DESTRUIDO" or " ✅"))
+    
+    -- HP directo
+    if ent.GetHP and ent.GetMaxHP then
+        local hp = ent:GetHP()
+        local maxHP = ent:GetMaxHP()
+        ply:ChatPrint("GetHP(): " .. hp .. " / " .. maxHP .. (hp <= 0 and " ❌ DESTRUIDO" or " ✅"))
+    else
+        ply:ChatPrint("GetHP(): N/A")
+    end
+    
+    -- NetworkVar HP
+    local nwhp = ent:GetNWInt("LVS_HP", -1)
+    ply:ChatPrint("NWInt LVS_HP: " .. nwhp .. (nwhp == 0 and " ❌ DESTRUIDO" or nwhp == -1 and " (no usado)" or " ✅"))
+    
+    -- NetworkVar Destroyed
+    local nwdest = ent:GetNWBool("LVS_IsDestroyed", false)
+    ply:ChatPrint("NWBool LVS_IsDestroyed: " .. tostring(nwdest) .. (nwdest and " ❌ DESTRUIDO" or " ✅"))
+    
+    -- En llamas
+    local onfire = ent:IsOnFire()
+    ply:ChatPrint("IsOnFire(): " .. tostring(onfire) .. (onfire and " ❌ DESTRUIDO" or " ✅"))
+    
+    -- Color
+    local col = ent:GetColor()
+    local isDark = (col.r < 50 and col.g < 50 and col.b < 50)
+    ply:ChatPrint("Color: R=" .. col.r .. " G=" .. col.g .. " B=" .. col.b .. (isDark and " ❌ DESTRUIDO" or " ✅"))
+    
+    -- GetDestroyed
+    if ent.GetDestroyed then
+        local dest = ent:GetDestroyed()
+        ply:ChatPrint("GetDestroyed(): " .. tostring(dest) .. (dest and " ❌ DESTRUIDO" or " ✅"))
+    else
+        ply:ChatPrint("GetDestroyed(): N/A")
+    end
+    
+    ply:ChatPrint("")
+    ply:ChatPrint("--- Resultado Final ---")
+    local isDestroyed = IsVehicleDestroyed(ent)
+    ply:ChatPrint("¿Está destruido?: " .. (isDestroyed and "❌ SÍ" or "✅ NO"))
+    
+    if isDestroyed then
+        ply:ChatPrint("El icono NO debería aparecer en el mapa")
+    else
+        ply:ChatPrint("El icono SÍ debería aparecer en el mapa")
+    end
 end)

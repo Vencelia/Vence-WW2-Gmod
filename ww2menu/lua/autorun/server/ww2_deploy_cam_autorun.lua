@@ -118,7 +118,7 @@ concommand.Add("ww2_cam_fov", function(ply, cmd, args)
     if not IsValid(ply) or not ply:IsAdmin() then return end
     
     local fov = tonumber(args[1])
-    if not fov or fov < 30 or fov > 120 then
+    if not fov or fov < 30 or fov > 300 then
         ply:ChatPrint("[WW2] Uso: ww2_cam_fov <30-120>")
         ply:ChatPrint("[WW2] Ejemplo: ww2_cam_fov 70")
         return

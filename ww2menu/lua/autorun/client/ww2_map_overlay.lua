@@ -23,8 +23,8 @@ local colNeutral = Color(200,200,200)
 local cvarIconScale = CreateClientConVar("ww2_map_icon_scale", "1.8", true, false, "Escala iconos mapa (0.5..4.0)", 0.5, 4.0)
 
 -- Calibración fina (ajustar si hay offset residual)
-local OFFSET_X = 0
-local OFFSET_Y = 0
+local OFFSET_X = -0
+local OFFSET_Y = -0
 
 surface.CreateFont("WW2_MapOverlay_Title",{font="Montserrat", size=ScreenScale(12), weight=1000})
 surface.CreateFont("WW2_MapOverlay_Sub",  {font="Montserrat", size=ScreenScale(7),  weight=600})
@@ -44,37 +44,36 @@ end
 -- ✅ FIX: PROYECCIÓN 3D→2D CORRECTA
 -- ============================================
 local function WorldToScreenCustom(worldPos, viewData)
-    local ang = viewData.angles
-    local origin = viewData.origin
-    local fov = viewData.fov
-    local w = viewData.w
-    local h = viewData.h
-    
-    -- Vector relativo a la cámara
+    local ang   = viewData.angles
+    local origin= viewData.origin
+    local fov   = viewData.fov or 70
+    local w     = viewData.w
+    local h     = viewData.h
+
     local delta = worldPos - origin
-    
-    -- Rotación inversa (matriz de vista)
-    local forward = ang:Forward()
+    local fwd   = ang:Forward()
     local right = ang:Right()
-    local up = ang:Up()
-    
+    local up    = ang:Up()
+
     local x = delta:Dot(right)
-    local y = delta:Dot(forward)
+    local y = delta:Dot(fwd)
     local z = delta:Dot(up)
-    
-    -- Proyección perspectiva
-    if y <= 0.1 then 
-        return nil, nil, false -- Detrás de la cámara
+
+    if y <= 0.1 then return nil, nil, false end
+
+    local tanHalfV = math.tan(math.rad(fov) * 0.5)
+    local scale = (h * 0.5)
+    local cv = GetConVar and GetConVar("ww2_map_proj_scale")
+    if cv and cv.GetFloat then
+        scale = scale * math.max(0.5, math.min(3.0, cv:GetFloat()))
     end
-    
-    local fovRad = math.rad(fov)
-    local aspect = w / h
-    local tanHalfFov = math.tan(fovRad / 2)
-    
-    local screenX = (x / (y * tanHalfFov * aspect)) * (w / 2) + (w / 2) + OFFSET_X
-    local screenY = (-z / (y * tanHalfFov)) * (h / 2) + (h / 2) + OFFSET_Y
-    
-    return screenX, screenY, true
+
+    local sx = (x / (y * tanHalfV)) * scale + (w * 0.5)
+    local sy = (-z / (y * tanHalfV)) * scale + (h * 0.5)
+    if OFFSET_X then sx = sx + OFFSET_X end
+    if OFFSET_Y then sy = sy + OFFSET_Y end
+    return sx, sy, true
+
 end
 -- ============================================
 

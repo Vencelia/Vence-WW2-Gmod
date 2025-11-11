@@ -2,6 +2,39 @@ WW2_SelectedClassFromMenu = WW2_SelectedClassFromMenu or nil
 if SERVER then return end
 include("autorun/shared/ww2_factions_sh.lua")
 
+-- === LVS: aliveness check (client) ===
+function IsLVSAliveClient(veh)
+    if not IsValid(veh) then return false end
+    if veh.GetIsDestroyed and veh:GetIsDestroyed() then return false end
+    if veh.GetDisabled     and veh:GetDisabled()     then return false end
+    -- HP APIs
+    local hp, maxhp
+    if veh.GetHP then
+        local okH, v = pcall(function() return veh:GetHP() end)
+        if okH then hp = tonumber(v) end
+    end
+    if veh.GetMaxHP then
+        local okM, v = pcall(function() return veh:GetMaxHP() end)
+        if okM then maxhp = tonumber(v) end
+    end
+    if hp ~= nil and maxhp ~= nil and maxhp > 0 and hp <= 0 then return false end
+    -- NW flags
+    if veh.GetNW2Bool and (veh:GetNW2Bool("LVS_Destroyed", false) or veh:GetNW2Bool("lvs_destroyed", false) or veh:GetNW2Bool("LVS_Disabled", false)) then
+        return false
+    end
+    if veh.GetNWBool and (veh:GetNWBool("LVS_Destroyed", false) or veh:GetNWBool("lvs_destroyed", false) or veh:GetNWBool("LVS_Disabled", false)) then
+        return false
+    end
+    -- NW HP exact 0 means dead
+    local hp2 = veh.GetNW2Int and veh:GetNW2Int("LVS_HP", -1) or -1
+    if hp2 == 0 then return false end
+    local hp1 = veh.GetNWInt and veh:GetNWInt("LVS_HP", -1) or -1
+    if hp1 == 0 then return false end
+    return true
+end
+
+
+
 
 -- Validación cliente: solo permite desplegar al dueño o defensor en disputa
 local function WW2_FindCapPointByLabel(lbl)
@@ -35,6 +68,7 @@ local colBorder  = Color(15,15,18,220)
 local colShadow  = Color(0,0,0,200)
 
 local cvarIconScale = CreateClientConVar("ww2_map_icon_scale", "1.8", true, false, "Escala iconos mapa (0.5..4.0)", 0.5, 4.0)
+local cvarDeployProjScale = CreateClientConVar("ww2_deploy_proj_scale", "1.00", true, false, "Escala radial de proyección en mapa de deploy (0.5..3.0)", 0.5, 3.0)
 
 -- Calibración fina (ajustar si hay offset residual)
 local OFFSET_X = 0
@@ -42,6 +76,7 @@ local OFFSET_Y = 0
 
 local CPTrend = {}
 local LastMarkers = {}
+local LastVehicles = {}
 
 local function FindDeployCam()
     local cams = ents.FindByClass("ww2_deploy_cam")
@@ -137,6 +172,12 @@ local function WorldToScreenCustom(worldPos, viewData)
     
     local screenX = (x / (y * tanHalfFov * aspect)) * (w / 2) + (w / 2) + OFFSET_X
     local screenY = (-z / (y * tanHalfFov)) * (h / 2) + (h / 2) + OFFSET_Y
+    -- Escala radial para alejar/acercar los iconos desde el centro del panel (configurable)
+    local scale = 1.0
+    if cvarDeployProjScale then scale = math.Clamp(cvarDeployProjScale:GetFloat(), 0.5, 3.0) end
+    local cx, cy = w * 0.5, h * 0.5
+    screenX = cx + (screenX - cx) * scale
+    screenY = cy + (screenY - cy) * scale
     
     return screenX, screenY, true
 end
@@ -176,6 +217,89 @@ local function ClampToPanel(px, py, panelW, panelH, margin)
     local cx, cy = panelW * 0.5, panelH * 0.5
     local dx, dy = px - cx, py - cy
     if dx == 0 and dy == 0 then dx = 0.001 end
+-- ==============================
+--  LVS ICONS (solo camiones vivos)
+-- ==============================
+local _lvsCache = { nextScan = 0, reich = {}, ussr = {} }
+
+function GetLocalSide()
+    local lp = LocalPlayer()
+    if not IsValid(lp) then return nil end
+    -- Primero por string
+    local s = (lp:GetNWString("ww2_faction","") or ""):lower()
+    if s:find("reich") then return "reich" end
+    if s:find("ussr") or s:find("sov") then return "ussr" end
+    -- Fallback por Team/NWInt si existiera
+    local t = lp:Team()
+    if TEAM_REICH and t == TEAM_REICH then return "reich" end
+    if TEAM_USSR  and t == TEAM_USSR  then return "ussr"  end
+    local f = lp:GetNWInt("WW2_Faction",0)
+    if (TEAM_REICH and f == TEAM_REICH) or f == 1 then return "reich" end
+    if (TEAM_USSR  and f == TEAM_USSR)  or f == 2 then return "ussr"  end
+    return nil
+end
+
+-- Detección conservadora: solo consideramos destruido si APIs/flags lo dicen.
+local function IsVehicleDestroyed(veh)
+    if not IsValid(veh) then return true end
+    if veh.GetIsDestroyed and veh:GetIsDestroyed() then return true end
+    if veh.GetDisabled     and veh:GetDisabled()     then return true end
+
+    local hp, maxhp
+    if veh.GetHP then
+        local okH, v = pcall(function() return veh:GetHP() end)
+        if okH then hp = tonumber(v) end
+    end
+    if veh.GetMaxHP then
+        local okM, v = pcall(function() return veh:GetMaxHP() end)
+        if okM then maxhp = tonumber(v) end
+    end
+    if hp ~= nil and maxhp ~= nil and maxhp > 0 then
+        if hp <= 0 then return true else return false end
+    end
+
+    if veh.GetNW2Bool then
+        if veh:GetNW2Bool("LVS_Destroyed", false) or veh:GetNW2Bool("lvs_destroyed", false) or veh:GetNW2Bool("LVS_Disabled", false) then
+            return true
+        end
+    end
+    if veh.GetNWBool then
+        if veh:GetNWBool("LVS_Destroyed", false) or veh:GetNWBool("lvs_destroyed", false) or veh:GetNWBool("LVS_Disabled", false) then
+            return true
+        end
+    end
+
+    local hp2 = veh.GetNW2Int and veh:GetNW2Int("LVS_HP", -1) or -1
+    if hp2 == 0 then return true end
+    local hp1 = veh.GetNWInt and veh:GetNWInt("LVS_HP", -1) or -1
+    if hp1 == 0 then return true end
+
+    return false
+end
+
+
+local function DrawPlusIcon(px, py, size, fillCol)
+    local half = math.floor(size * 0.5)
+    local x = math.floor(px - half)
+    local y = math.floor(py - half)
+    surface.SetDrawColor(0,0,0,150) surface.DrawRect(x, y, size, size)
+    surface.SetDrawColor(255,255,255,255) surface.DrawOutlinedRect(x, y, size, size, 1)
+    fillCol = fillCol or Color(255,255,255)
+    local pad = math.max(3, math.floor(size * 0.2))
+    surface.SetDrawColor(fillCol.r, fillCol.g, fillCol.b, 200)
+    surface.DrawLine(px, y + pad, px, y + size - pad)
+    surface.DrawLine(x + pad, py, x + size - pad, py)
+end
+
+
+-- Invalida cache al destruir/quitar un LVS para que desaparezca rápido del mapa
+hook.Add("EntityRemoved","WW2_LVSCacheInvalidate_Map", function(ent)
+    if not IsValid(ent) then return end
+    local c = ent:GetClass()
+    if c == "lvs_wheeldrive_fiat_621" or c == "lvs_wheeldrive_gaz_aaa" then
+        if _lvsCache then _lvsCache.nextScan = 0 end
+    end
+end)
     local sx = (panelW * 0.5 - margin) / math.max(1, math.abs(dx))
     local sy = (panelH * 0.5 - margin) / math.max(1, math.abs(dy))
     local s = math.min(sx, sy)
@@ -194,20 +318,40 @@ local function DrawCircle(x, y, r)
     surface.DrawPoly(poly)
 end
 
-local function DrawArrowToCenter(x, y, cx, cy, size)
-    local ang = math.atan2(cy - y, cx - x)
-    local s = size or 12
-    local p1x, p1y = x + math.cos(ang) * s, y + math.sin(ang) * s
-    local left = ang + math.rad(130)
-    local right = ang - math.rad(130)
-    local p2x, p2y = x + math.cos(left) * (s*0.7), y + math.sin(left) * (s*0.7)
-    local p3x, p3y = x + math.cos(right) * (s*0.7), y + math.sin(right) * (s*0.7)
+
+local function DrawArrowToCenter(x, y, cx, cy, size, col)
+    -- Dibuja una flecha (triángulo) que apunta desde (x,y) hacia el centro (cx,cy)
+    -- size controla el largo, col el color opcional
+    local ang = math.atan2(cy - y, cx - x) -- radianes
+    local len = size or 14                 -- largo total
+    local base = len * 0.8                 -- qué tan atrás va la base respecto a la punta
+    local half = (len * 0.5) * 0.6         -- medio ancho de la base
+
+    -- Punto punta (un poco hacia la dirección)
+    local tipx = x + math.cos(ang) * len
+    local tipy = y + math.sin(ang) * len
+
+    -- Centro de la base (detrás de la punta)
+    local bx = tipx - math.cos(ang) * base
+    local by = tipy - math.sin(ang) * base
+
+    -- Vector perpendicular (para ancho de la base)
+    local px = -math.sin(ang)
+    local py =  math.cos(ang)
+
+    local p2x = bx + px * half
+    local p2y = by + py * half
+    local p3x = bx - px * half
+    local p3y = by - py * half
+
+    surface.SetDrawColor(col or Color(255,255,255,255))
     surface.DrawPoly({
-        {x = p1x, y = p1y},
-        {x = p2x, y = p2y},
-        {x = p3x, y = p3y},
+        {x = tipx, y = tipy},
+        {x = p2x,  y = p2y },
+        {x = p3x,  y = p3y },
     })
 end
+
 
 local function DrawMarkers(points, panelW, panelH, scale, sx, sy, view)
     LastMarkers = {}
@@ -491,6 +635,51 @@ local scrW, scrH = ScrW(), ScrH()
     local mapPanel = vgui.Create("DPanel", frame)
     mapPanel:SetPos(mapX, mapY)
     mapPanel:SetSize(mapW, mapH)
+function DrawLVSIcons(panelW, panelH, scale, view)
+
+    LastVehicles = {}
+    if not WorldToScreenCustom then return end
+
+    local side = GetLocalSide and GetLocalSide() or nil
+    if side ~= "reich" and side ~= "ussr" then return end
+
+    -- Facción -> clase exacta
+    local class = (side == "reich") and "lvs_wheeldrive_fiat_621" or "lvs_wheeldrive_gaz_aaa"
+
+    -- Recolectar solo vehículos válidos y no destruidos
+    local vehicles = {}
+    for _, ent in ipairs(ents.FindByClass(class) or {}) do
+        if IsValid(ent) and IsLVSAliveClient(ent) then
+            if IsLVSAliveClient(ent) then vehicles[#vehicles+1] = ent end
+        end
+    end
+    if #vehicles == 0 then return end
+
+    -- Numeración estable por EntIndex()
+    table.sort(vehicles, function(a,b) return a:EntIndex() < b:EntIndex() end)
+
+    local fill = (side == "reich") and Color(80,150,255) or Color(220,60,60)
+    local sz   = math.Clamp(math.floor(math.min(panelW, panelH) * 0.05 * (scale or 1)), 14, 40)
+
+    local viewData = { origin = view.origin, angles = view.angles, fov = view.fov, w = panelW, h = panelH }
+
+    for i = 1, #vehicles do
+        local ent = vehicles[i]
+        local px, py = WorldToScreenCustom(ent:GetPos(), viewData)
+        if px and py then
+            px, py = ClampToPanel(px, py, panelW, panelH, 10)
+
+            -- Cuadrado sólido centrado
+            local bx, by = math.floor(px - sz/2), math.floor(py - sz/2)
+            surface.SetDrawColor(fill)        surface.DrawRect(bx, by, sz, sz)
+            surface.SetDrawColor(0,0,0,180)   surface.DrawOutlinedRect(bx, by, sz, sz, 1)
+
+            -- Número blanco centrado (1..N)
+            draw.SimpleText(tostring(i), "WW2_MapIcon", bx + sz/2, by + sz/2, Color(255,255,255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+            table.insert(LastVehicles, { x = bx, y = by, w = sz, h = sz, entIndex = ent:EntIndex() })
+        end
+    end
+end
     mapPanel.Paint = function(self, w, h)
         surface.SetDrawColor(20,20,20,255) surface.DrawRect(0,0,w,h)
         local camEnt = FindDeployCam()
@@ -501,7 +690,7 @@ local scrW, scrH = ScrW(), ScrH()
             local sx, sy = self:LocalToScreen(0, 0)
             local yaw = camEnt:GetAngles().y
             local origin = camEnt:GetPos() + Vector(0,0,CAM_HEIGHT)
-            local view = {origin=origin, angles=Angle(90, yaw, 0), x=sx, y=sy, w=w, h=h, fov=camEnt.GetCamFOV and camEnt:GetCamFOV() or 70, drawviewmodel=false, drawhud=false, znear=3}
+            local view = {origin=origin, angles=Angle(90, yaw, 0), x=sx, y=sy, w=w, h=h, fov=camEnt.GetCamFOV and camEnt:GetCamFOV() or 200, drawviewmodel=false, drawhud=false, znear=3}
 
             render.RenderView(view)
             
@@ -511,6 +700,8 @@ local scrW, scrH = ScrW(), ScrH()
             render.SetScissorRect(sx, sy, sx + w, sy + h, true)
             local scale = math.Clamp(cvarIconScale:GetFloat(), 0.5, 4.0)
             DrawMarkers(pts, w, h, scale, sx, sy, view)
+            -- LVS vivos
+            DrawLVSIcons(w, h, scale, view)
             render.SetScissorRect(0, 0, 0, 0, false)
 
             surface.SetDrawColor(255,255,255,25) surface.DrawOutlinedRect(0,0,w,h,2)
@@ -524,6 +715,29 @@ local scrW, scrH = ScrW(), ScrH()
         local sx, sy = self:LocalToScreen(0,0)
         if mx < sx or my < sy or mx > sx + self:GetWide() or my > sy + self:GetTall() then return end
         local px, py = mx - sx, my - sy
+        -- Prioridad: click en camiones LVS dibujados
+        for _, v in ipairs(LastVehicles or {}) do
+            if PointInRect(px, py, v) then
+                -- Si el jugador eligió clase en el menú, reenviarla al server
+                                -- Validar entidad y que esté viva
+                local ent = Entity(v.entIndex)
+                if not IsValid(ent) or not IsLVSAliveClient(ent) then surface.PlaySound("buttons/button10.wav"); return end
+
+                if WW2_SelectedClassFromMenu then
+                    net.Start("WW2_ElegirClase")
+                        net.WriteString(tostring(WW2_SelectedClassFromMenu))
+                    net.SendToServer()
+                end
+                -- Enviar deploy tipo 'vehicle' con EntIndex como label
+                net.Start("WW2_DeployTo")
+                    net.WriteString("vehicle")
+                    net.WriteString(tostring(v.entIndex))
+                    net.WriteString("")
+                net.SendToServer()
+                surface.PlaySound("buttons/button14.wav")
+                return
+            end
+        end
         for _, mk in ipairs(LastMarkers) do
             if mk.kind == "base" and PointInCircle(px, py, mk) then
                 local side = LocalPlayer():GetNWString("ww2_faction","")
@@ -576,8 +790,7 @@ end
 if CLIENT then
     net.Receive("WW2_DeployAck", function()
         if IsValid(WW2_DEPLOY_FRAME) then
-            WW2_DEPLOY_FRAME:Remove()
-            WW2_DEPLOY_FRAME = nil
+            WW2_DEPLOY_FRAME:Close()
         end
     end)
 end

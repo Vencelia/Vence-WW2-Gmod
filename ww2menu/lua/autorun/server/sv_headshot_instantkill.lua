@@ -1,9 +1,9 @@
 -- sv_headshot_instantkill.lua
 -- Headshot: muerte instantánea
--- Casco (Reich/USSR): 40% desvío (una vez por vida) + bodygroup "helmet" + casco físico que sale disparado
+-- Casco (Reich/USSR): 99% desvío (una vez por vida) + bodygroup "headwear" + casco físico que sale disparado
 -- Diferencia visual por facción:
---   - USSR: casco normal
---   - Reich: casco gris oscuro (85,85,85,255)
+--   - USSR: headwear 1→0 (quitar), casco soviético
+--   - Reich: headwear 0→1 (quitar), casco alemán
 -- Sonidos:
 --   - Si el casco te salva: SOLO metal
 --   - Si NO te salva y mueres: body break, pero SOLO en PlayerDeath (muerte real)
@@ -12,10 +12,12 @@ if SERVER then
     local METAL_HIT_SND  = "physics/metal/metal_solid_impact_bullet2.wav"
     local BODY_BREAK_SND = "physics/body/body_medium_break2.wav"
     local HELMET_CHANCE  = 0.99
-    local HELMET_MODEL   = "models/half-dead/red orchestra 2/sov/w_helmet.mdl"
+    
+    -- ✅ Modelos de casco por facción
+    local HELMET_MODEL_USSR  = "models/half-dead/red orchestra 2/sov/w_helmet.mdl"
+    local HELMET_MODEL_REICH = "models/half-dead/red orchestra 2/ger/w_helmet.mdl"
+    
     local NW_HELMET_USED = "WW2_HelmetConsumed"
-
-    local COLOR_REICH = Color(85,85,85,255)
 
     -- Debug helper
     CreateConVar("ww2_helmet_debug", "0", FCVAR_ARCHIVE, "Debug del casco (logs en server)")
@@ -28,6 +30,7 @@ if SERVER then
     -- Limpieza de hooks por si existían previos
     hook.Remove("ScalePlayerDamage", "WW2_HeadshotInstantKill")
     hook.Remove("EntityTakeDamage", "WW2_BlockAfterHelmet_ETD")
+    hook.Remove("EntityTakeDamage", "WW2_HeadshotFallback")
     hook.Remove("PlayerShouldTakeDamage", "WW2_BlockAfterHelmet_PSTD")
     hook.Remove("PlayerSpawn", "WW2_ResetHelmetUse")
     hook.Remove("PlayerDeath", "WW2_BodyBreakOnHeadshotDeath")
@@ -43,39 +46,82 @@ if SERVER then
         ply.__WW2_HelmetInvulnUntil = nil
         ply.__WW2_PlayBodyBreakOnDeath = nil
 
-        -- Reset bodygroup "helmet"
-        local idx = ply:FindBodygroupByName("helmet")
-        if idx and idx >= 0 then ply:SetBodygroup(idx, 0) end
+        -- NO resetear bodygroup aquí, eso lo maneja ww2_factions_sv.lua
     end)
 
-    -- ¿Facciones con casco? y etiqueta
-    local function GetHelmetFactionTag(ply)
+    -- ✅ Obtener facción del jugador
+    local function GetPlayerFaction(ply)
         if not IsValid(ply) or not ply:IsPlayer() then return nil end
-        local fac
-        if isfunction(ply.WW2_GetFaction) then fac = ply:WW2_GetFaction() end
-        if fac == nil or fac == "" then fac = ply:GetNWString("WW2_Faction", "") end
-
-        if isnumber(fac) then
-            if (FACTION_REICH and fac == FACTION_REICH) then return "reich" end
-            if (FACTION_USSR  and fac == FACTION_USSR)  then return "ussr" end
-            return nil
+        
+        -- Intentar WW2_GetFaction primero
+        if isfunction(ply.WW2_GetFaction) then 
+            local fac = ply:WW2_GetFaction()
+            if fac and fac ~= "" then return fac end
         end
-
-        local s = tostring(fac):Trim():lower()
-        local reich = { "reich","tercer reich","tercer_reich","axis reich","axis_reich" }
-        for _,k in ipairs(reich) do if s==k then return "reich" end end
-        local ussr  = { "ussr","unión soviética","union sovietica","soviet","soviet union","sovietica" }
-        for _,k in ipairs(ussr)  do if s==k then return "ussr" end end
+        
+        -- Fallback a NetworkVar
+        local fac = ply:GetNWString("ww2_faction", "")
+        if fac == "reich" or fac == "ussr" then return fac end
+        
         return nil
     end
 
-    local function HasHelmetFaction(ply)
-        return GetHelmetFactionTag(ply) ~= nil
+    -- ✅ Verificar si el jugador tiene casco activo según su facción
+    local function HasHelmetActive(ply)
+        local fac = GetPlayerFaction(ply)
+        if not fac then return false end
+        
+        -- Buscar bodygroup "headwear"
+        local idx = ply:FindBodygroupByName("headwear")
+        if not idx or idx < 0 then
+            idx = ply:FindBodygroupByName("Headwear")
+        end
+        if not idx or idx < 0 then
+            idx = ply:FindBodygroupByName("HEADWEAR")
+        end
+        
+        if not idx or idx < 0 then 
+            DPrint("No se encontró bodygroup 'headwear' en", ply:Nick())
+            return false 
+        end
+        
+        local currentValue = ply:GetBodygroup(idx)
+        
+        -- USSR: headwear=1 significa CON casco
+        -- Reich: headwear=0 significa CON casco
+        if fac == "ussr" then
+            return currentValue == 1
+        elseif fac == "reich" then
+            return currentValue == 0
+        end
+        
+        return false
     end
 
-    local function TryApplyHelmetBodygroup(ply)
-        local idx = ply:FindBodygroupByName("helmet")
-        if idx and idx >= 0 then ply:SetBodygroup(idx, 1) end
+    -- ✅ Quitar casco visualmente según facción
+    local function RemoveHelmetVisual(ply)
+        local fac = GetPlayerFaction(ply)
+        if not fac then return end
+        
+        local idx = ply:FindBodygroupByName("headwear")
+        if not idx or idx < 0 then
+            idx = ply:FindBodygroupByName("Headwear")
+        end
+        if not idx or idx < 0 then
+            idx = ply:FindBodygroupByName("HEADWEAR")
+        end
+        
+        if not idx or idx < 0 then return end
+        
+        if fac == "ussr" then
+            -- USSR: 1→0 (quitar casco)
+            ply:SetBodygroup(idx, 0)
+            DPrint("Casco USSR removido para", ply:Nick(), "(headwear 1→0)")
+        elseif fac == "reich" then
+            -- Reich: 0→1 (quitar casco)
+            ply:SetBodygroup(idx, 1)
+            DPrint("Casco Reich removido para", ply:Nick(), "(headwear 0→1)")
+        end
     end
 
     -- Calcula dirección de impacto SIN usar dmginfo luego (evitamos CTakeDamageInfo nulo en timer)
@@ -112,9 +158,14 @@ if SERVER then
         return (-ply:GetAimVector()):GetNormalized()
     end
 
-    -- Spawnea y lanza un casco físico desde la cabeza, con color opcional
-    local function SpawnFlyingHelmet(ply, launchDir, optColor)
-        util.PrecacheModel(HELMET_MODEL)
+    -- ✅ Spawnea y lanza un casco físico desde la cabeza (modelo según facción)
+    local function SpawnFlyingHelmet(ply, launchDir)
+        local fac = GetPlayerFaction(ply)
+        if not fac then return end
+        
+        -- Modelo según facción
+        local helmetModel = (fac == "reich") and HELMET_MODEL_REICH or HELMET_MODEL_USSR
+        util.PrecacheModel(helmetModel)
 
         -- Esperar al próximo tick para tener huesos/pos estable
         timer.Simple(0, function()
@@ -138,18 +189,14 @@ if SERVER then
                 return
             end
 
-            ent:SetModel(HELMET_MODEL)
+            ent:SetModel(helmetModel)
             ent:SetPos(headPos + dir * 2 + Vector(0,0,4))
             ent:SetAngles(headAng or AngleRand())
             ent:Spawn()
             ent:Activate()
-            if optColor then
-                ent:SetRenderMode(RENDERMODE_NORMAL)
-                ent:SetColor(optColor)
-            end
 
             -- Seguridad de colisiones
-            ent:SetCollisionGroup(COLLISION_GROUP_DEBRIS) -- no choca con players, casi nada
+            ent:SetCollisionGroup(COLLISION_GROUP_DEBRIS)
             ent:SetOwner(ply)
 
             local phys = ent:GetPhysicsObject()
@@ -162,7 +209,7 @@ if SERVER then
                 phys:AddAngleVelocity(VectorRand() * 200)
                 -- Autoremove
                 timer.Simple(8, function() if IsValid(ent) then ent:Remove() end end)
-                DPrint("Spawn OK prop_physics casco")
+                DPrint("Spawn OK prop_physics casco", fac)
                 return
             end
 
@@ -176,14 +223,10 @@ if SERVER then
                 return
             end
 
-            dyn:SetModel(HELMET_MODEL)
+            dyn:SetModel(helmetModel)
             dyn:SetPos(headPos + dir * 2 + Vector(0,0,4))
             dyn:SetAngles(headAng or AngleRand())
             dyn:Spawn()
-            if optColor then
-                dyn:SetRenderMode(RENDERMODE_NORMAL)
-                dyn:SetColor(optColor)
-            end
             dyn:SetMoveType(MOVETYPE_FLYGRAVITY)
             dyn:SetSolid(SOLID_NONE)
             dyn:SetCollisionGroup(COLLISION_GROUP_IN_VEHICLE)
@@ -194,7 +237,7 @@ if SERVER then
             dyn:SetLocalAngularVelocity(Angle(math.random(-200,200), math.random(-200,200), math.random(-200,200)))
 
             timer.Simple(8, function() if IsValid(dyn) then dyn:Remove() end end)
-            DPrint("Spawn OK prop_dynamic casco (fallback)")
+            DPrint("Spawn OK prop_dynamic casco (fallback)", fac)
         end)
     end
 
@@ -202,33 +245,92 @@ if SERVER then
     hook.Add("ScalePlayerDamage", "WW2_HeadshotInstantKill", function(ply, hitgroup, dmginfo)
         if not IsValid(ply) or not ply:IsPlayer() then return end
         if not ply:Alive() then return end
+        
+        -- ✅ DEBUG: Ver qué hitgroup está llegando
+        DPrint(string.format("Daño recibido: %s | Hitgroup: %d | Daño: %.1f", 
+            ply:Nick(), hitgroup, dmginfo:GetDamage()))
+        
         if hitgroup ~= HITGROUP_HEAD then return end
 
-        if HasHelmetFaction(ply) and not ply:GetNWBool(NW_HELMET_USED, false) and math.random() < HELMET_CHANCE then
+        DPrint("¡HEADSHOT DETECTADO en", ply:Nick(), "!")
+
+        -- ✅ Verificar si tiene casco según facción Y no lo ha usado
+        if HasHelmetActive(ply) and not ply:GetNWBool(NW_HELMET_USED, false) and math.random() < HELMET_CHANCE then
             ply:SetNWBool(NW_HELMET_USED, true)
             ArmInvulnFrame(ply, 0.12)
+
+            DPrint("CASCO SALVÓ A", ply:Nick())
 
             -- Anular daño
             dmginfo:SetDamage(0)
             dmginfo:ScaleDamage(0)
             if dmginfo.SetDamageForce then dmginfo:SetDamageForce(Vector(0,0,0)) end
 
-            -- Feedback + bodygroup + casco físico (con color por facción)
+            -- ✅ Feedback + QUITAR bodygroup + casco físico
             ply:EmitSound(METAL_HIT_SND, 75, 100, 1, CHAN_AUTO)
-            TryApplyHelmetBodygroup(ply)
+            RemoveHelmetVisual(ply)
 
             local dir = CalcImpactDir(ply, dmginfo)
-            local tag = GetHelmetFactionTag(ply)
-            local col = (tag == "reich") and COLOR_REICH or nil -- USSR = nil (color default)
-            SpawnFlyingHelmet(ply, dir, col)
+            SpawnFlyingHelmet(ply, dir)
 
             ply.__WW2_PlayBodyBreakOnDeath = nil
             return
         end
 
         -- Letal
+        DPrint("HEADSHOT LETAL en", ply:Nick())
         dmginfo:SetDamage(ply:Health() + 1000)
         ply.__WW2_PlayBodyBreakOnDeath = true
+    end)
+    
+    -- ✅ FALLBACK: Hook adicional para detectar headshots si ScalePlayerDamage falla
+    hook.Add("EntityTakeDamage", "WW2_HeadshotFallback", function(ply, dmginfo)
+        if not IsValid(ply) or not ply:IsPlayer() then return end
+        if not ply:Alive() then return end
+        if InInvulnFrame(ply) then return end -- Ya procesado
+        
+        -- Detectar headshot por posición del daño
+        local hitPos = dmginfo:GetDamagePosition()
+        if hitPos and hitPos ~= Vector(0,0,0) then
+            local headBone = ply:LookupBone("ValveBiped.Bip01_Head1")
+            if headBone then
+                local headPos = ply:GetBonePosition(headBone)
+                local dist = hitPos:Distance(headPos)
+                
+                -- Si el impacto está cerca de la cabeza (radio 15 unidades)
+                if dist < 15 then
+                    DPrint("HEADSHOT DETECTADO POR POSICIÓN en", ply:Nick(), "- Distancia:", dist)
+                    
+                    -- Verificar si tiene casco
+                    if HasHelmetActive(ply) and not ply:GetNWBool(NW_HELMET_USED, false) and math.random() < HELMET_CHANCE then
+                        ply:SetNWBool(NW_HELMET_USED, true)
+                        ArmInvulnFrame(ply, 0.12)
+                        
+                        DPrint("CASCO SALVÓ A", ply:Nick(), "(fallback)")
+                        
+                        -- Anular daño
+                        dmginfo:SetDamage(0)
+                        dmginfo:ScaleDamage(0)
+                        if dmginfo.SetDamageForce then dmginfo:SetDamageForce(Vector(0,0,0)) end
+                        
+                        -- Efectos
+                        ply:EmitSound(METAL_HIT_SND, 75, 100, 1, CHAN_AUTO)
+                        RemoveHelmetVisual(ply)
+                        
+                        local dir = CalcImpactDir(ply, dmginfo)
+                        SpawnFlyingHelmet(ply, dir)
+                        
+                        ply.__WW2_PlayBodyBreakOnDeath = nil
+                        return true -- Bloquear daño
+                    else
+                        -- Headshot letal
+                        DPrint("HEADSHOT LETAL en", ply:Nick(), "(fallback)")
+                        dmginfo:SetDamage(ply:Health() + 1000)
+                        ply.__WW2_PlayBodyBreakOnDeath = true
+                    end
+                end
+            end
+        end
     end)
 
     -- Blindajes redundantes
@@ -245,12 +347,55 @@ if SERVER then
         if InInvulnFrame(ply) then return false end
     end)
 
-    -- Sonido de “romper cuerpo” solo si realmente murió
+    -- Sonido de "romper cuerpo" solo si realmente murió
     hook.Add("PlayerDeath", "WW2_BodyBreakOnHeadshotDeath", function(victim, inflictor, attacker)
         if not IsValid(victim) then return end
         if victim.__WW2_PlayBodyBreakOnDeath then
             victim:EmitSound(BODY_BREAK_SND, 75, 100, 1, CHAN_AUTO)
         end
         victim.__WW2_PlayBodyBreakOnDeath = nil
+    end)
+    
+    -- ✅ COMANDO DE TESTING
+    concommand.Add("ww2_test_headshot", function(ply, cmd, args)
+        if not IsValid(ply) or not ply:IsAdmin() then return end
+        
+        ply:ChatPrint("=== TEST HEADSHOT SYSTEM ===")
+        ply:ChatPrint("Facción: " .. (GetPlayerFaction(ply) or "NINGUNA"))
+        ply:ChatPrint("Tiene casco activo: " .. tostring(HasHelmetActive(ply)))
+        ply:ChatPrint("Casco usado: " .. tostring(ply:GetNWBool(NW_HELMET_USED, false)))
+        
+        -- Mostrar bodygroups
+        local idx = ply:FindBodygroupByName("headwear") or ply:FindBodygroupByName("Headwear") or ply:FindBodygroupByName("HEADWEAR")
+        if idx and idx >= 0 then
+            ply:ChatPrint("Headwear bodygroup índice: " .. idx)
+            ply:ChatPrint("Headwear valor actual: " .. ply:GetBodygroup(idx))
+            ply:ChatPrint("Headwear opciones totales: " .. ply:GetBodygroupCount(idx))
+        else
+            ply:ChatPrint("⚠️ NO se encontró bodygroup 'headwear'")
+        end
+        
+        ply:ChatPrint("Usa 'ww2_helmet_debug 1' para ver logs detallados")
+    end)
+    
+    concommand.Add("ww2_force_headshot", function(ply, cmd, args)
+        if not IsValid(ply) or not ply:IsAdmin() then return end
+        
+        -- Simular un headshot
+        local dmg = DamageInfo()
+        dmg:SetDamage(50)
+        dmg:SetAttacker(ply)
+        dmg:SetInflictor(ply)
+        dmg:SetDamageType(DMG_BULLET)
+        
+        -- Posición de la cabeza
+        local headBone = ply:LookupBone("ValveBiped.Bip01_Head1")
+        if headBone then
+            local headPos = ply:GetBonePosition(headBone)
+            dmg:SetDamagePosition(headPos)
+        end
+        
+        ply:TakeDamageInfo(dmg)
+        ply:ChatPrint("[WW2] Headshot simulado - revisa consola del servidor")
     end)
 end

@@ -10,15 +10,15 @@ local MODEL = {
 
 local LOADOUT = {
     REICH_TANQUISTA = { "tfa_codww2_mp40", "tfa_codww2_ger_frag", "tfa_codww2_p38", "weapon_lvsrepair", "tfa_codww2_shovel", "weapon_extinguisher" },
-    REICH_ASALTO       = { "tfa_codww2_mp40", "tfa_codww2_shovel", "tfa_codww2_luger", "tfa_codww2_ger_frag" },
-    REICH_FUSILERO     = { "tfa_codww2_kar98k", "tfa_codww2_luger", "tfa_codww2_trenchknife" },
+    REICH_ASALTO       = { "tfa_codww2_mp40", "tfa_codww2_shovel", "tfa_codww2_luger", "tfa_codww2_ger_frag", "tfa_codww2_satchel_charge" },
+    REICH_FUSILERO     = { "tfa_codww2_kar98k", "tfa_codww2_luger", "tfa_codww2_trenchknife", "tfa_codww2_ger_frag", "tfa_codww2_satchel_charge" },
     REICH_SOPORTE      = { "tfa_codww2_stg44", "tfa_codww2_luger", "tfa_codww2_shovel", "tfa_codww2_m18_smoke", "tfa_codww2_ger_frag" },
     REICH_AMETRALLADOR = { "tfa_codww2_mg42", "tfa_codww2_luger", "tfa_codww2_ger_frag" },
     REICH_MEDICO       = { "tfa_codww2_gewehr43", "weapon_medkit", "tfa_codww2_p38" },
 	
     USSR_TANQUISTA  = { "tfa_codww2_greasegun", "tfa_codww2_no2", "weapon_lvsrepair", "tfa_codww2_n74_mk1", "tfa_codww2_shovel", "weapon_extinguisher" },
-    USSR_ASALTO   = { "tfa_codww2_ppsh41", "tfa_codww2_no2", "tfa_codww2_molotov", "ctfa_codww2_shovel" },
-    USSR_FUSILERO = { "tfa_codww2_mosin", "tfa_codww2_no2", "tfa_codww2_molotov", "tfa_codww2_trenchknife" },
+    USSR_ASALTO   = { "tfa_codww2_ppsh41", "tfa_codww2_no2", "tfa_codww2_molotov", "ctfa_codww2_shovel", "tfa_codww2_satchel_charge" },
+    USSR_FUSILERO = { "tfa_codww2_mosin", "tfa_codww2_no2", "tfa_codww2_molotov", "tfa_codww2_trenchknife", "tfa_codww2_satchel_charge" },
     USSR_SOPORTE  = { "tfa_codww2_avs36", "tfa_codww2_m18_smoke", "tfa_codww2_usa_frag", "tfa_codww2_shovel" },
     USSR_MEDICO   = { "tfa_codww2_svt40", "weapon_medkit", "tfa_codww2_trenchknife", "tfa_codww2_molotov" },
 	USSR_AMETRALLADOR   = { "tfa_codww2_lewis", "tfa_codww2_molotov", "tfa_codww2_no2", "tfa_codww2_shovel" },
