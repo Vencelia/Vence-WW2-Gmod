@@ -199,9 +199,46 @@ end
 
 -- === Resolución del transform de spawn ===
 local function ResolveSpawnTransform(ply, destType, label)
+
+-- Consume one-shot base override (captured enemy base) to choose exact base position
+if ply.WW2_BaseOverride then
+    local ent = Entity(ply.WW2_BaseOverride)
+    if IsValid(ent) and ent.GetClass and string.find(string.lower(ent:GetClass()), "ww2_base_", 1, true) then
+        ply.WW2_BaseOverride = nil -- consume immediately to avoid sticky spawns
+        local pos = ent:GetPos() + Vector(0,0,8)
+        local ang = ent:GetAngles()
+        return pos, ang
+    end
+end
+
+-- Override: if a specific base entity was selected (captured enemy base), use its position as the base origin
+if destType == "base" and ply.WW2_BaseOverride then
+    local ent = Entity(ply.WW2_BaseOverride)
+    if IsValid(ent) then
+        local pos = ent:GetPos() + Vector(0,0,8)
+        local ang = ent:GetAngles()
+        return pos, ang
+    end
+end
     local side = GetPlayerFaction(ply)
 
     if destType == "base" then
+
+-- Si el label trae EntIndex de base válida, usarla (necesario para TANQUISTA con múltiples bases)
+do
+    if destType == "base" and label and label ~= "" then
+        local idx = tonumber(label)
+        if idx then
+            local ent = Entity(idx)
+            if IsValid(ent) and ent.GetClass and string.find(string.lower(ent:GetClass() or ""), "ww2_base_", 1, true) then
+                local pos = ent:GetPos()
+                local ang = Angle(0, ent:EyeAngles().y, 0)
+                local gpos, gang = GroundPosFrom(pos)
+                return gpos, ang
+            end
+        end
+    end
+end
         local baseEnt = FindBaseForFaction(side)
         if IsValid(baseEnt) then
             local pos = baseEnt:GetPos()
@@ -454,44 +491,74 @@ local function DoDeploy(ply, destType, label, transport)
     end)
 end
 
+
 -- === NET ===
 net.Receive("WW2_DeployTo", function(len, ply)
     if not IsValid(ply) then return end
-    local destType = string.lower(net.ReadString() or "")
-    local label    = net.ReadString() or ""
+
+    local destType  = string.lower(net.ReadString() or "")
+    local label     = net.ReadString() or ""
     local transport = ""
     pcall(function() transport = net.ReadString() or "" end)
 
-    -- Validaciones
-    if destType ~= "base" and destType ~= "point" and destType ~= "vehicle" then return end
-    
-    -- Tanquistas no pueden usar vehículos de transporte
-    if IsTanquistaPly(ply) and destType == "vehicle" then return end
-    if IsTanquistaPly(ply) and destType == "point" then return end
-    
-    if destType == "point" and not CanDeployToPointServer(ply, label) then return end
-    
-    -- ✅ FIX: Validación especial para vehículos destruidos
-    if destType == "vehicle" then
-        local vehIdx = tonumber(label)
-        if vehIdx then
-            local veh = Entity(vehIdx)
-            
-            -- Verificar si existe
-            if not IsValid(veh) then
-                ply:ChatPrint("[WW2] El vehículo ya no existe.")
+    -- Reset override by default on each request
+    ply.WW2_BaseOverride = nil
+
+    -- === BASE: ownership rules + EntIndex en label ===
+    if destType == "base" then
+        local num = tonumber(label or "")
+        local baseEnt = (num and Entity(num)) or nil
+        if IsValid(baseEnt) and string.find(string.lower(baseEnt:GetClass() or ""), "ww2_base_", 1, true) then
+            local base_side = (baseEnt.GetNW2String and baseEnt:GetNW2String("base_side","")) or (baseEnt.GetNWString and baseEnt:GetNWString("base_side","")) or ""
+            local owner     = (baseEnt.GetNW2String and baseEnt:GetNW2String("cap_owner","")) or (baseEnt.GetNWString and baseEnt:GetNWString("cap_owner","")) or ""
+            local mySide    = (ply.GetNWString and ply:GetNWString("ww2_faction","")) or ""
+
+            -- Mi base capturada por enemigo -> bloquear
+            if base_side == mySide and owner ~= "" and owner ~= base_side then
                 return
             end
-            
-            -- ✅ Usar función centralizada
-            if IsVehicleDestroyed(veh) then
-                ply:ChatPrint("[WW2] El vehículo está destruido.")
-                return
+            -- Base enemiga capturada por mi bando -> permitir solo PIE/AUTO
+            if base_side ~= mySide then
+                if owner ~= mySide then return end -- aún no capturada
+                local t = string.lower(transport or "")
+                if t == "camion" or t == "truck" then return end
+                -- Señalar base específica para el resolver
+                ply.WW2_BaseOverride = baseEnt:EntIndex()
             end
         end
     end
 
+    -- Validaciones básicas
+    if destType ~= "base" and destType ~= "point" and destType ~= "vehicle" then return end
+
+    -- Tanquista: restricciones
+    if IsTanquistaPly and IsTanquistaPly(ply) then
+        if destType == "vehicle" then return end
+        if destType == "point"   then return end
+    end
+
+    -- Puntos de captura: reglas servidor
+    if destType == "point" and (not CanDeployToPointServer or not CanDeployToPointServer(ply, label)) then return end
+
+    -- Vehículos: validar existencia / destrucción
+    if destType == "vehicle" then
+        local vehIdx = tonumber(label)
+        if not vehIdx then return end
+        local veh = Entity(vehIdx)
+        if not IsValid(veh) then
+            if IsValid(ply) then ply:ChatPrint("[WW2] El vehículo ya no existe.") end
+            return
+        end
+        if IsVehicleDestroyed and IsVehicleDestroyed(veh) then
+            if IsValid(ply) then ply:ChatPrint("[WW2] El vehículo está destruido.") end
+            return
+        end
+    end
+
     DoDeploy(ply, destType, label, transport)
+
+    -- Clear override after deploy to avoid sticky spawns
+    ply.WW2_BaseOverride = nil
 end)
 
 -- ============================================
@@ -640,4 +707,9 @@ concommand.Add("ww2_vehicle_info", function(ply, cmd, args)
     else
         ply:ChatPrint("El icono SÍ debería aparecer en el mapa")
     end
+end)
+
+-- Safety: clear any lingering base override on spawn
+hook.Add("PlayerSpawn", "WW2_ClearBaseOverrideOnSpawn", function(ply)
+    ply.WW2_BaseOverride = nil
 end)

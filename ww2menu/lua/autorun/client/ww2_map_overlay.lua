@@ -165,6 +165,36 @@ end
 
 local function GetBases() return ents.FindByClass("ww2_base_reich"), ents.FindByClass("ww2_base_ussr") end
 
+-- ================== LVs / Facción Helpers ==================
+local function GetLocalSide()
+    local lp = LocalPlayer()
+    if not IsValid(lp) then return "" end
+    return lp:GetNWString("ww2_faction","")
+end
+
+local function IsLVSAliveClient(veh)
+    if not IsValid(veh) then return false end
+    if veh.GetIsDestroyed and veh:GetIsDestroyed() then return false end
+    if veh.GetDisabled     and veh:GetDisabled()     then return false end
+    local hp, maxhp
+    if veh.GetHP then local okH, v = pcall(function() return veh:GetHP() end); if okH then hp = tonumber(v) end end
+    if veh.GetMaxHP then local okM, v = pcall(function() return veh:GetMaxHP() end); if okM then maxhp = tonumber(v) end end
+    if hp ~= nil and maxhp ~= nil and maxhp > 0 and hp <= 0 then return false end
+    if veh.GetNW2Bool and (veh:GetNW2Bool("LVS_Destroyed", false) or veh:GetNW2Bool("LVS_Disabled", false)) then return false end
+    if veh.GetNWBool  and (veh:GetNWBool("LVS_Destroyed", false) or veh:GetNWBool("LVS_Disabled", false))  then return false end
+    local hp1 = veh.GetNWInt and veh:GetNWInt("LVS_HP", -1) or -1
+    if hp1 == 0 then return false end
+    return true
+end
+
+-- Mapear camión por bando
+local function GetTruckClassForSide(side)
+    if side == "reich" then return "lvs_wheeldrive_fiat_621" end
+    if side == "ussr"  then return "lvs_wheeldrive_gaz_aaa" end
+    return nil
+end
+
+
 local function GetPlayerFactionColor()
     local side = LocalPlayer():GetNWString("ww2_faction","")
     if side == "reich" then return colReich
@@ -202,8 +232,14 @@ local function DrawMarkers(w, h, sx, sy, view)
             local baseSize = math.min(w, h) * 0.10 * scale
             local r = math.floor(baseSize * 0.5)
 
+        -- Color por propietario actual
+        local owner = (b.GetNW2String and b:GetNW2String("cap_owner","")) or (b.GetNWString and b:GetNWString("cap_owner","")) or ""
+        local drawCol = col
+        if owner == "reich" then drawCol = colReich elseif owner == "ussr" then drawCol = colUSSR end
+
+
             surface.SetDrawColor(0,0,0,180); DrawCircle(px+2, py+2, r)
-            surface.SetDrawColor(col); DrawCircle(px, py, r)
+            surface.SetDrawColor(drawCol); DrawCircle(px, py, r)
             surface.SetDrawColor(40,42,46,240); DrawCircle(px, py, r-4)
 
             draw.SimpleText(text, "WW2_MapBase", px+1, py+1, Color(0,0,0,200), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
@@ -262,7 +298,69 @@ local function DrawMarkers(w, h, sx, sy, view)
         draw.SimpleText(label, "WW2_MapIcon", bx + sz/2,     by + sz/2,     Color(255,255,255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
     end
 
-    -- ✅ FIX: Proyección correcta para el jugador
+    
+
+-- ================== CAMIONES DE MI FACCION ==================
+do
+    local side = GetLocalSide()
+    local class = GetTruckClassForSide(side)
+    if class then
+        local list = ents.FindByClass(class) or {}
+        local scale = math.Clamp(cvarIconScale:GetFloat(), 0.5, 4.0)
+        local col = (side == "reich") and colReich or (side == "ussr" and colUSSR or colNeutral)
+        local base = math.min(w, h) * 0.05
+        local sz = math.floor(base * 0.8 * scale) -- ligeramente más pequeño que un punto de captura
+        for _, ent in ipairs(list) do
+            if IsValid(ent) and IsLVSAliveClient(ent) then
+                local px, py = WorldToScreenCustom(ent:GetPos(), {
+                    origin=view.origin, angles=view.angles, fov=view.fov, w=w, h=h
+                })
+                if px and py then
+                    px, py = ClampToPanel(px, py, w, h, 10)
+                    local bx, by = math.floor(px - sz/2), math.floor(py - sz/2)
+                    surface.SetDrawColor(0,0,0,200)  surface.DrawRect(bx+2, by+2, sz, sz)
+                    surface.SetDrawColor(40,42,46,230) surface.DrawRect(bx, by, sz, sz)
+                    surface.SetDrawColor(col)          surface.DrawRect(bx+2, by+2, sz-4, sz-4)
+                    surface.SetDrawColor(colBorder)    surface.DrawOutlinedRect(bx, by, sz, sz, 2)
+                    draw.SimpleText("TRUCK", "WW2_MapIcon", bx + sz/2, by + sz/2, Color(255,255,255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+                end
+            end
+        end
+    end
+end
+
+-- ================== ALIADOS EN EL MAPA (solo mi facción) ==================
+do
+    local lp = LocalPlayer()
+    local mySide = GetLocalSide()
+    local allyCol = (mySide == "reich") and colReich or (mySide == "ussr" and colUSSR or colNeutral)
+    local scale = math.Clamp(cvarIconScale:GetFloat(), 0.5, 4.0)
+    local baseR = math.max(4, math.floor(math.min(w,h) * 0.008)) -- aliados
+    local selfR = math.max(6, math.floor(math.min(w,h) * 0.012)) -- jugador local (más grande)
+
+    for _, p in ipairs(player.GetAll()) do
+        if IsValid(p) and p ~= lp then
+            if p:GetNWString("ww2_faction","") == mySide then
+                local px, py = WorldToScreenCustom(p:GetPos(), {origin=view.origin, angles=view.angles, fov=view.fov, w=w, h=h})
+                if px and py then
+                    local clamped
+                    px, py, clamped = ClampToPanel(px, py, w, h, 10)
+                    surface.SetDrawColor(0,0,0,200) DrawCircle(px+2, py+2, baseR)
+                    surface.SetDrawColor(allyCol)     DrawCircle(px, py, baseR)
+                    if clamped then
+                        surface.SetDrawColor(allyCol)
+                        DrawArrowToCenter(px, py, w*0.5, h*0.5, math.max(10, baseR*1.2))
+                    end
+                end
+            end
+        end
+    end
+
+    -- Ajustar el tamaño del jugador local (más grande que aliados)
+    -- (La sección del jugador local existente abajo ya lo dibuja. Aumentamos r dinámicamente)
+end
+
+-- ✅ FIX: Proyección correcta para el jugador
     local lp = LocalPlayer()
     if IsValid(lp) then
         local px, py, visible = WorldToScreenCustom(lp:GetPos(), viewData)
@@ -270,7 +368,7 @@ local function DrawMarkers(w, h, sx, sy, view)
             local clamped
             px, py, clamped = ClampToPanel(px, py, w, h, 10)
 
-            local r = math.max(6, math.floor(math.min(w,h) * 0.012))
+            local r = math.max(8, math.floor(math.min(w,h) * 0.015)) -- más grande que aliados
             local facCol = GetPlayerFactionColor()
             surface.SetDrawColor(0,0,0,200) DrawCircle(px+2, py+2, r)
             surface.SetDrawColor(facCol)     DrawCircle(px, py, r)

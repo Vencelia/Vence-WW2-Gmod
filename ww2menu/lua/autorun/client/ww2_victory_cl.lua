@@ -145,6 +145,8 @@ hook.Add("HUDPaint", "WW2_VictoryScreen", function()
     )
     
     -- ✅ SUBTÍTULO (resultado para el jugador)
+    -- Info extra
+    draw.SimpleText("Todas las bases y puntos controlados", "WW2_Victory_Sub", ScrW()*0.5, ScrH()*0.52, Color(235,235,235, 220), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
     local subtitleText = isWinner and "VICTORIA" or "DERROTA"
     local subtitleColor = isWinner and Color(80,150,255, textAlpha) or Color(255, 60, 60, textAlpha)
     

@@ -380,15 +380,29 @@ local function DrawMarkers(points, panelW, panelH, scale, sx, sy, view)
             px, py = ClampToPanel(px, py, panelW, panelH, 18)
             local baseSize = math.min(panelW, panelH) * 0.10 * scale
             local r = math.floor(baseSize * 0.5)
+            
+            -- Precompute flags for click: entIndex + blocked for my faction if base is captured by enemy
+            local entIndex = b:EntIndex()
+            local owner = (b.GetNW2String and b:GetNW2String("cap_owner","")) or (b.GetNWString and b:GetNWString("cap_owner","")) or ""
+            local base_side = (b.GetNW2String and b:GetNW2String("base_side","")) or (b.GetNWString and b:GetNWString("base_side","")) or ""
+            local mySide = LocalPlayer():GetNWString("ww2_faction","")
+            local blocked = (mySide == base_side) and (owner ~= "" and owner ~= base_side)
+        
+
+            -- Color por propietario actual (mantener texto original)
+            local owner = (b.GetNW2String and b:GetNW2String("cap_owner","")) or (b.GetNWString and b:GetNWString("cap_owner","")) or ""
+            local drawCol = col
+            if owner == "reich" then drawCol = colReich elseif owner == "ussr" then drawCol = colUSSR end
+
 
             surface.SetDrawColor(0,0,0,180); DrawCircle(px+2, py+2, r)
-            surface.SetDrawColor(col); DrawCircle(px, py, r)
+            surface.SetDrawColor(drawCol); DrawCircle(px, py, r)
             surface.SetDrawColor(40,42,46,240); DrawCircle(px, py, r-4)
 
             draw.SimpleText(text, "WW2_MapBase", px+1, py+1, Color(0,0,0,200), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
             draw.SimpleText(text, "WW2_MapBase", px,   py,   Color(255,255,255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 
-            table.insert(LastMarkers, {kind="base", side=side, x=px, y=py, r=r})
+            table.insert(LastMarkers, {kind="base", side=side, x=px, y=py, r=r, entIndex=b:EntIndex()})
         end
     end
     drawBaseList(basesReich, colReich, "REICH", "reich")
@@ -640,7 +654,10 @@ function DrawLVSIcons(panelW, panelH, scale, view)
     LastVehicles = {}
     if not WorldToScreenCustom then return end
 
-    local side = GetLocalSide and GetLocalSide() or nil
+    
+    -- ⛔ Ocultar camiones si eres TANQUISTA
+    if IsTanquistaClass(WW2_SelectedClassFromMenu) then return end
+local side = GetLocalSide and GetLocalSide() or nil
     if side ~= "reich" and side ~= "ussr" then return end
 
     -- Facción -> clase exacta
@@ -718,6 +735,9 @@ end
         -- Prioridad: click en camiones LVS dibujados
         for _, v in ipairs(LastVehicles or {}) do
             if PointInRect(px, py, v) then
+                -- ⛔ TANQUISTA NO PUEDE USAR CAMIONES (ni enviar net)
+                if IsTanquistaClass(WW2_SelectedClassFromMenu) then surface.PlaySound("buttons/button10.wav"); return end
+
                 -- Si el jugador eligió clase en el menú, reenviarla al server
                                 -- Validar entidad y que esté viva
                 local ent = Entity(v.entIndex)
@@ -740,9 +760,113 @@ end
         end
         for _, mk in ipairs(LastMarkers) do
             if mk.kind == "base" and PointInCircle(px, py, mk) then
+-- TANQUISTA: solo puede desplegar en SU base principal NO capturada.
+if IsTanquistaClass and IsTanquistaClass(WW2_SelectedClassFromMenu) then
+    if mk.entIndex then
+        local ent = Entity(mk.entIndex)
+        if IsValid(ent) then
+            local mySide    = LocalPlayer():GetNWString("ww2_faction","")
+            local base_side = (ent.GetNW2String and ent:GetNW2String("base_side","")) or (ent.GetNWString and ent:GetNWString("base_side","")) or ""
+            local owner     = (ent.GetNW2String and ent:GetNW2String("cap_owner","")) or (ent.GetNWString and ent:GetNWString("cap_owner","")) or ""
+            -- Solo permitir si la base es de mi facción y el dueño actual es la facción original
+            if not (mySide == base_side and owner == base_side) then
+                surface.PlaySound("buttons/button10.wav")
+                return
+            end
+        end
+    end
+end
+
+                -- Lógica de apertura con el MISMO menú existente (sin crear uno nuevo)
+                do
+                    local ent = (mk.entIndex and Entity(mk.entIndex)) or nil
+                    if IsValid(ent) then
+                        local mySide    = LocalPlayer():GetNWString("ww2_faction","")
+                        local base_side = (ent.GetNW2String and ent:GetNW2String("base_side","")) or (ent.GetNWString and ent:GetNWString("base_side","")) or ""
+                        local owner     = (ent.GetNW2String and ent:GetNW2String("cap_owner","")) or (ent.GetNWString and ent:GetNWString("cap_owner","")) or ""
+                        -- 1) Mi base capturada por enemigo: bloquear (ya hay early return arriba, pero doble seguro)
+                        if mySide == base_side and owner ~= "" and owner ~= base_side then
+                            surface.PlaySound("buttons/button10.wav")
+                            return
+                        end
+                        -- 2) Base enemiga capturada por mi facción: abrir diálogo sin CAMION
+                        if mySide ~= base_side and owner == mySide then
+    if IsTanquistaClass and IsTanquistaClass(WW2_SelectedClassFromMenu) then surface.PlaySound("buttons/button10.wav"); return end
+    WW2_OpenTransportDialog("base", tostring(mk.entIndex or ""), false)
+    return
+end
+                        -- 3) Caso normal: mi base propia libre o enemiga sin capturar → comportamiento normal
+                        if mySide == mk.side then
+                            WW2_OpenTransportDialog("base", tostring(mk.entIndex or ""), true)
+                            return
+                        end
+                    end
+                end
+    
+                -- HARD BLOCK: si mi propia base fue capturada por el enemigo, NO abrir menú ni enviar nets
+                do
+                    if mk.blocked then surface.PlaySound("buttons/button10.wav"); return end
+                    local ent = (mk.entIndex and Entity(mk.entIndex)) or nil
+                    if IsValid(ent) then
+                        local mySide   = LocalPlayer():GetNWString("ww2_faction","")
+                        local base_side = (ent.GetNW2String and ent:GetNW2String("base_side","")) or (ent.GetNWString and ent:GetNWString("base_side","")) or ""
+                        local owner     = (ent.GetNW2String and ent:GetNW2String("cap_owner","")) or (ent.GetNWString and ent:GetNWString("cap_owner","")) or ""
+                        if mySide == base_side and owner ~= "" and owner ~= base_side then
+                            surface.PlaySound("buttons/button10.wav")
+                            return
+                        end
+                    end
+                end
+    
+-- Si es base enemiga capturada por mi facción -> ofrecer PIE/AUTO y mandar net directo con entIndex
+do
+    local side = LocalPlayer():GetNWString("ww2_faction","")
+    if mk.entIndex then
+        local ent = Entity(mk.entIndex)
+        if IsValid(ent) then
+            local base_side = (ent.GetNW2String and ent:GetNW2String("base_side","")) or (ent.GetNWString and ent:GetNWString("base_side","")) or ""
+            local owner     = (ent.GetNW2String and ent:GetNW2String("cap_owner","")) or (ent.GetNWString and ent:GetNWString("cap_owner","")) or ""
+            if base_side ~= side and owner == side then
+                local m = DermaMenu()
+                m:AddOption("PIE", function()
+                    net.Start("WW2_DeployTo")
+                        net.WriteString("base")
+                        net.WriteString(tostring(mk.entIndex))
+                        net.WriteString("pie")
+                    net.SendToServer()
+                end)
+                m:AddOption("AUTO", function()
+                    net.Start("WW2_DeployTo")
+                        net.WriteString("base")
+                        net.WriteString(tostring(mk.entIndex))
+                        net.WriteString("auto")
+                    net.SendToServer()
+                end)
+                m:Open()
+                return
+            end
+        end
+    end
+end
+
+                -- Bloqueo: si mi propia base fue capturada por el enemigo, no abrir diálogo
+                do
+                    if mk.entIndex then
+                        local ent = Entity(mk.entIndex)
+                        if IsValid(ent) then
+                            local base_side = (ent.GetNW2String and ent:GetNW2String("base_side","")) or (ent.GetNWString and ent:GetNWString("base_side","")) or ""
+                            local owner     = (ent.GetNW2String and ent:GetNW2String("cap_owner","")) or (ent.GetNWString and ent:GetNWString("cap_owner","")) or ""
+                            if side == base_side and owner ~= "" and owner ~= base_side then
+                                surface.PlaySound("buttons/button10.wav")
+                                return
+                            end
+                        end
+                    end
+                end
+
                 local side = LocalPlayer():GetNWString("ww2_faction","")
                 if side == mk.side then
-                    WW2_OpenTransportDialog("base", "", true)
+                    WW2_OpenTransportDialog("base", tostring(mk.entIndex or ""), true)
                 end
                 return
             end
