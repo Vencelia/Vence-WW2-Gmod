@@ -160,6 +160,9 @@ local function WorldToScreenCustom(worldPos, viewData)
     local x = delta:Dot(right)
     local y = delta:Dot(forward)
     local z = delta:Dot(up)
+
+    -- Nunca devolvemos nil: si queda "detrás" de la cámara, clipeamos cerca
+    if y <= 0.1 then y = 0.1 end
     
     -- Proyección perspectiva
     if y <= 0.1 then 
@@ -309,6 +312,7 @@ end)
 end
 
 local function DrawCircle(x, y, r)
+    draw.NoTexture()
     local seg = math.max(20, math.floor(r*0.8))
     local poly = {}
     for i=0, seg-1 do
@@ -477,6 +481,57 @@ local function DrawMarkers(points, panelW, panelH, scale, sx, sy, view)
 
         table.insert(LastMarkers, {kind="point", label=label, x=bx, y=by, w=sz, h=sz})
     end
+    -- ================== ALIADOS / JUGADOR EN MAPA DE DESPLIEGUE ==================
+    do
+        local lp = LocalPlayer()
+        local mySide = GetLocalSide and GetLocalSide() or ""
+        if IsValid(lp) and (mySide == "reich" or mySide == "ussr") then
+            local allyCol = (mySide == "reich") and colReich or colUSSR
+            local scaleR  = math.Clamp(scale or 1.0, 0.5, 4.0)
+            local baseR   = math.max(4, math.floor(math.min(panelW, panelH) * 0.008 * scaleR)) -- aliados
+            local selfR   = math.max(baseR + 2, math.floor(math.min(panelW, panelH) * 0.012 * scaleR)) -- jugador local
+
+            -- Aliados (misma facción, excluyendo local)
+            for _, p in ipairs(player.GetAll()) do
+                if IsValid(p) and p ~= lp and p:Alive() then
+                    if p:GetNWString("ww2_faction","") == mySide then
+                        local px, py = WorldToScreenCustom(p:GetPos(), viewData)
+                        if px and py then
+                            local clamped
+                            px, py, clamped = ClampToPanel(px, py, panelW, panelH, 10)
+                            surface.SetDrawColor(0,0,0,200)
+                            DrawCircle(px+2, py+2, baseR)
+                            surface.SetDrawColor(allyCol)
+                            DrawCircle(px, py, baseR)
+                            if clamped then
+                                surface.SetDrawColor(allyCol)
+                                DrawArrowToCenter(px, py, cx, cy, math.max(10, baseR*1.2))
+                            end
+                        end
+                    end
+                end
+            end
+
+            -- Jugador local (un poco más grande para distinguir)
+            local px, py = WorldToScreenCustom(lp:GetPos(), viewData)
+            if px and py then
+                local clamped
+                px, py, clamped = ClampToPanel(px, py, panelW, panelH, 10)
+                surface.SetDrawColor(0,0,0,220)
+                DrawCircle(px+2, py+2, selfR)
+                surface.SetDrawColor(allyCol)
+                DrawCircle(px, py, selfR)
+                surface.SetDrawColor(255,255,255,255)
+                surface.DrawOutlinedRect(px - selfR, py - selfR, selfR*2, selfR*2, 1)
+                if clamped then
+                    surface.SetDrawColor(allyCol)
+                    DrawArrowToCenter(px, py, cx, cy, math.max(12, selfR*1.2))
+                end
+            end
+        end
+    end
+
+
 end
 
 local function PointInRect(x, y, r) return x >= r.x and y >= r.y and x <= r.x + r.w and y <= r.y + r.h end

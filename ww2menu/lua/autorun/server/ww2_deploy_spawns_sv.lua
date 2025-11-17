@@ -199,54 +199,62 @@ end
 
 -- === Resolución del transform de spawn ===
 local function ResolveSpawnTransform(ply, destType, label)
-
--- Consume one-shot base override (captured enemy base) to choose exact base position
-if ply.WW2_BaseOverride then
-    local ent = Entity(ply.WW2_BaseOverride)
-    if IsValid(ent) and ent.GetClass and string.find(string.lower(ent:GetClass()), "ww2_base_", 1, true) then
-        ply.WW2_BaseOverride = nil -- consume immediately to avoid sticky spawns
-        local pos = ent:GetPos() + Vector(0,0,8)
-        local ang = ent:GetAngles()
-        return pos, ang
-    end
-end
-
--- Override: if a specific base entity was selected (captured enemy base), use its position as the base origin
-if destType == "base" and ply.WW2_BaseOverride then
-    local ent = Entity(ply.WW2_BaseOverride)
-    if IsValid(ent) then
-        local pos = ent:GetPos() + Vector(0,0,8)
-        local ang = ent:GetAngles()
-        return pos, ang
-    end
-end
     local side = GetPlayerFaction(ply)
 
+    -- =========================
+    --  BASES (REICH / USSR)
+    -- =========================
     if destType == "base" then
+        local baseEnt
 
--- Si el label trae EntIndex de base válida, usarla (necesario para TANQUISTA con múltiples bases)
-do
-    if destType == "base" and label and label ~= "" then
-        local idx = tonumber(label)
-        if idx then
-            local ent = Entity(idx)
+        -- 1) Override desde NET (base enemiga capturada que has clicado)
+        if ply.WW2_BaseOverride then
+            local ent = Entity(ply.WW2_BaseOverride)
             if IsValid(ent) and ent.GetClass and string.find(string.lower(ent:GetClass() or ""), "ww2_base_", 1, true) then
-                local pos = ent:GetPos()
-                local ang = Angle(0, ent:EyeAngles().y, 0)
+                baseEnt = ent
+            end
+            -- consumir override para que no se quede pegado
+            ply.WW2_BaseOverride = nil
+        end
+
+        -- 2) Si el label trae EntIndex de base válida (click directo/tanquista), usarla
+        if (not IsValid(baseEnt)) and label and label ~= "" then
+            local idx = tonumber(label)
+            if idx then
+                local ent = Entity(idx)
+                if IsValid(ent) and ent.GetClass and string.find(string.lower(ent:GetClass() or ""), "ww2_base_", 1, true) then
+                    baseEnt = ent
+                end
+            end
+        end
+
+        -- 3) Fallback: base principal de la facción
+        if not IsValid(baseEnt) then
+            baseEnt = FindBaseForFaction(side)
+        end
+
+        if IsValid(baseEnt) then
+            -- ENLACE BASE → ENTIDAD DE DESPLIEGUE (ww2_spawn_reich / ww2_spawn_ussr)
+            local origin = baseEnt:GetPos()
+            local spawn  = FindNearestFactionSpawn(side, origin)
+
+            if IsValid(spawn) then
+                local spos = spawn:GetPos()
+                local sang = Angle(0, spawn:EyeAngles().y, 0)
+                local gpos, gang = GroundPosFrom(spos)
+                return gpos, sang
+            else
+                -- Si no hay entidades ww2_spawn_* en el mapa, fallback = base
+                local pos = baseEnt:GetPos() + Vector(0,0,8)
+                local ang = baseEnt:GetAngles()
                 local gpos, gang = GroundPosFrom(pos)
                 return gpos, ang
             end
         end
-    end
-end
-        local baseEnt = FindBaseForFaction(side)
-        if IsValid(baseEnt) then
-            local pos = baseEnt:GetPos()
-            local ang = Angle(0, baseEnt:EyeAngles().y, 0)
-            local gpos, gang = GroundPosFrom(pos)
-            return gpos, ang
-        end
 
+    -- =========================
+    --  PUNTOS DE CAPTURA
+    -- =========================
     elseif destType == "point" then
         if not CanDeployToPointServer(ply, label) then return nil end
         local cp = FindCapturePointByLabel(label)
@@ -260,27 +268,28 @@ end
             else
                 -- fallback (si no hay spawns de facción en el mapa)
                 local pos = cp:GetPos()
-                local ang = Angle(0, cp:EyeAngles().y, 0)
+                local ang = cp:GetAngles()
                 local gpos, gang = GroundPosFrom(pos)
                 return gpos, ang
             end
         end
-    
-    -- ✅ NUEVO: Spawn en vehículo
+
+    -- =========================
+    --  VEHÍCULOS LVS
+    -- =========================
     elseif destType == "vehicle" then
         local vehIdx = tonumber(label)
         if not vehIdx then return nil end
-        
+
         local veh = Entity(vehIdx)
         if not IsValid(veh) then return nil end
-        
-        -- ✅ FIX: Usar función centralizada para verificar destrucción
+
+        -- Usar función centralizada para verificar destrucción
         if IsVehicleDestroyed(veh) then
             print("[WW2] Spawn rechazado: vehículo destruido")
             return nil
         end
-        
-        -- ✅ FIX: Lista EXACTA de vehículos permitidos por facción
+
         local vehClass = veh:GetClass()
         local allowedVehicles = {
             reich = {
@@ -290,19 +299,17 @@ end
                 ["lvs_wheeldrive_gaz_aaa"] = true
             }
         }
-        
-        -- Verificar que el vehículo sea de la facción correcta Y esté en la lista
+
         if not allowedVehicles[side] or not allowedVehicles[side][vehClass] then
             print("[WW2] Vehículo rechazado:", vehClass, "para facción:", side)
             return nil
         end
-        
-        -- Retornar posición del vehículo (el spawn se maneja diferente)
+
         return veh:GetPos(), veh:GetAngles(), veh
     end
+
     return nil
 end
-
 -- === Vehículos LVS ===
 local VEH_BY_FACTION = {
     ussr = {

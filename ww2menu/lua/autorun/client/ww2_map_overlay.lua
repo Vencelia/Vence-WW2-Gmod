@@ -22,9 +22,14 @@ local colNeutral = Color(200,200,200)
 
 local cvarIconScale = CreateClientConVar("ww2_map_icon_scale", "1.8", true, false, "Escala iconos mapa (0.5..4.0)", 0.5, 4.0)
 
+-- Ajustes finos iguales al menú de deploy
+local cvarMapProjScale = CreateClientConVar("ww2_map_proj_scale", "1.00", true, false, "Escala radial de proyección en overlay (0.5..3.0)", 0.5, 3.0)
+local cvarMapOffsetX   = CreateClientConVar("ww2_map_offset_x", "0", true, false, "Offset X (px) overlay", -2048, 2048)
+local cvarMapOffsetY   = CreateClientConVar("ww2_map_offset_y", "0", true, false, "Offset Y (px) overlay", -2048, 2048)
+
 -- Calibración fina (ajustar si hay offset residual)
-local OFFSET_X = -0
-local OFFSET_Y = -0
+local OFFSET_X = 0
+local OFFSET_Y = 0
 
 surface.CreateFont("WW2_MapOverlay_Title",{font="Montserrat", size=ScreenScale(12), weight=1000})
 surface.CreateFont("WW2_MapOverlay_Sub",  {font="Montserrat", size=ScreenScale(7),  weight=600})
@@ -59,19 +64,25 @@ local function WorldToScreenCustom(worldPos, viewData)
     local y = delta:Dot(fwd)
     local z = delta:Dot(up)
 
+    -- Nunca devolvemos nil: si queda "detrás" de la cámara, clipeamos cerca
+    if y <= 0.1 then y = 0.1 end
+
     if y <= 0.1 then return nil, nil, false end
 
     local tanHalfV = math.tan(math.rad(fov) * 0.5)
     local scale = (h * 0.5)
-    local cv = GetConVar and GetConVar("ww2_map_proj_scale")
-    if cv and cv.GetFloat then
-        scale = scale * math.max(0.5, math.min(3.0, cv:GetFloat()))
-    end
+    local projScale = (cvarMapProjScale and cvarMapProjScale:GetFloat()) or 1.0
+    projScale = math.max(0.5, math.min(3.0, projScale))
+    scale = scale * projScale
 
     local sx = (x / (y * tanHalfV)) * scale + (w * 0.5)
     local sy = (-z / (y * tanHalfV)) * scale + (h * 0.5)
-    if OFFSET_X then sx = sx + OFFSET_X end
-    if OFFSET_Y then sy = sy + OFFSET_Y end
+
+    local offx = (cvarMapOffsetX and cvarMapOffsetX:GetInt()) or 0
+    local offy = (cvarMapOffsetY and cvarMapOffsetY:GetInt()) or 0
+    sx = sx + offx
+    sy = sy + offy
+
     return sx, sy, true
 
 end
@@ -91,6 +102,7 @@ local function ClampToPanel(px, py, panelW, panelH, margin)
 end
 
 local function DrawCircle(x, y, r)
+    draw.NoTexture()
     local seg = math.max(20, math.floor(r*0.8))
     local poly = {}
     for i=0, seg-1 do
@@ -341,7 +353,7 @@ do
     for _, p in ipairs(player.GetAll()) do
         if IsValid(p) and p ~= lp then
             if p:GetNWString("ww2_faction","") == mySide then
-                local px, py = WorldToScreenCustom(p:GetPos(), {origin=view.origin, angles=view.angles, fov=view.fov, w=w, h=h})
+                local px, py = WorldToScreenCustom(p:GetPos(), viewData)
                 if px and py then
                     local clamped
                     px, py, clamped = ClampToPanel(px, py, w, h, 10)
@@ -422,7 +434,7 @@ local function EnsureOverlay()
         local sx, sy = self:LocalToScreen(0, 0)
         local yaw = camEnt:GetAngles().y
         local origin = camEnt:GetPos() + Vector(0,0,CAM_HEIGHT)
-        local view = { origin=origin, angles=Angle(90, yaw, 0), x=sx, y=sy, w=w, h=h, fov=camEnt.GetCamFOV and camEnt:GetCamFOV() or 70, drawviewmodel=false, drawhud=false, znear=3 }
+        local view = { origin=origin, angles=Angle(90, yaw, 0), x=sx, y=sy, w=w, h=h, fov=camEnt.GetCamFOV and camEnt:GetCamFOV() or 200, drawviewmodel=false, drawhud=false, znear=3 }
 
         render.RenderView(view)
         render.SetScissorRect(sx, sy, sx + w, sy + h, true)
@@ -444,9 +456,24 @@ local function EnsureOverlay()
 
     -- scroll wheel para escala de iconos
     function MAP_PANEL:OnMouseWheeled(dlta)
-        local v = math.Clamp(cvarIconScale:GetFloat() + dlta*0.1, 0.5, 4.0)
-        RunConsoleCommand("ww2_map_icon_scale", tostring(v))
-        return true
+        if input.IsKeyDown(KEY_LCONTROL) or input.IsKeyDown(KEY_RCONTROL) then
+            local v = math.Clamp(cvarMapProjScale:GetFloat() + dlta*0.05, 0.5, 3.0)
+            RunConsoleCommand("ww2_map_proj_scale", string.format("%.2f", v))
+            return true
+        elseif input.IsKeyDown(KEY_LSHIFT) or input.IsKeyDown(KEY_RSHIFT) then
+            if input.IsKeyDown(KEY_LALT) or input.IsKeyDown(KEY_RALT) then
+                local oy = cvarMapOffsetY:GetInt()
+                RunConsoleCommand("ww2_map_offset_y", tostring(oy + (dlta>0 and -2 or 2)))
+            else
+                local ox = cvarMapOffsetX:GetInt()
+                RunConsoleCommand("ww2_map_offset_x", tostring(ox + (dlta>0 and -2 or 2)))
+            end
+            return true
+        else
+            local v = math.Clamp(cvarIconScale:GetFloat() + dlta*0.1, 0.5, 4.0)
+            RunConsoleCommand("ww2_map_icon_scale", tostring(v))
+            return true
+        end
     end
 end
 
